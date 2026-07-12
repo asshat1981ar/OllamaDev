@@ -238,6 +238,21 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     private val _mcpError = MutableStateFlow<String?>(null)
     val mcpError: StateFlow<String?> = _mcpError.asStateFlow()
 
+    // MCP Registry integration
+    private val registryClient = McpRegistryClient()
+
+    private val _registryResults = MutableStateFlow<List<RegistryServerDetail>>(emptyList())
+    val registryResults: StateFlow<List<RegistryServerDetail>> = _registryResults.asStateFlow()
+
+    private val _registryNextCursor = MutableStateFlow<String?>(null)
+    val registryNextCursor: StateFlow<String?> = _registryNextCursor.asStateFlow()
+
+    private val _isRegistryLoading = MutableStateFlow(false)
+    val isRegistryLoading: StateFlow<Boolean> = _isRegistryLoading.asStateFlow()
+
+    private val _registryError = MutableStateFlow<String?>(null)
+    val registryError: StateFlow<String?> = _registryError.asStateFlow()
+
     private suspend fun connectMcpServer(serverId: Int, sourceUrl: String, type: String, authToken: String?) {
         val initResult = withContext(Dispatchers.IO) { mcpClient.initialize(sourceUrl, authToken) }
         val session = initResult.getOrNull()
@@ -381,6 +396,84 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 val authToken = SecurePrefs.getMcpToken(getApplication(), server.id)
                 connectMcpServer(server.id, server.sourceUrl, server.type, authToken)
             }
+        }
+    }
+
+    // MCP Registry Operations
+    fun searchRegistry(query: String = "", append: Boolean = false) {
+        viewModelScope.launch {
+            _isRegistryLoading.value = true
+            _registryError.value = null
+            try {
+                val cursor = if (append) _registryNextCursor.value else null
+                val result = registryClient.searchServers(
+                    query = query,
+                    limit = 30,
+                    cursor = cursor
+                )
+                result.fold(
+                    onSuccess = { (servers, nextCursor) ->
+                        if (append) {
+                            _registryResults.value = _registryResults.value + servers
+                        } else {
+                            _registryResults.value = servers
+                        }
+                        _registryNextCursor.value = nextCursor
+                    },
+                    onFailure = { error ->
+                        _registryError.value = error.localizedMessage ?: "Registry search failed"
+                    }
+                )
+            } finally {
+                _isRegistryLoading.value = false
+            }
+        }
+    }
+
+    fun clearRegistrySearch() {
+        _registryResults.value = emptyList()
+        _registryNextCursor.value = null
+        _registryError.value = null
+    }
+
+    /**
+     * Installs a server from the MCP Registry as a local [McpServer] and attempts to connect.
+     * For servers that require a secret header, the user must provide the token via the
+     * regular MCP server auth token field after install.
+     */
+    fun installRegistryServer(registryServer: RegistryServerDetail, authToken: String = "") {
+        viewModelScope.launch {
+            _registryError.value = null
+            val sourceUrl = registryServer.resolveStreamableHttpUrl()
+            if (sourceUrl == null) {
+                _registryError.value = "'${registryServer.name}' has no Streamable-HTTP endpoint."
+                return@launch
+            }
+
+            val serverType = registryServer.inferServerType()
+            val existing = db.mcpServerDao().getAllServersSync()
+                .firstOrNull { it.sourceUrl == sourceUrl }
+            if (existing != null) {
+                // Already installed; just try to connect
+                toggleMcpServerStatus(existing.copy(status = "Disconnected"))
+                return@launch
+            }
+
+            val displayName = registryServer.title ?: registryServer.name.substringAfterLast("/").replace("-", " ")
+            val id = db.mcpServerDao().insertServer(
+                McpServer(
+                    name = displayName,
+                    type = serverType,
+                    sourceUrl = sourceUrl,
+                    status = "Connecting",
+                    toolsCount = 0,
+                    configuredParams = "{}"
+                )
+            ).toInt()
+            if (authToken.isNotBlank()) {
+                SecurePrefs.setMcpToken(getApplication(), id, authToken)
+            }
+            connectMcpServer(id, sourceUrl, serverType, authToken.ifBlank { null })
         }
     }
 

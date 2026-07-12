@@ -41,6 +41,7 @@ fun McpSkillsScreen(
     val mcpError by viewModel.mcpError.collectAsState()
 
     var showAddServerDialog by remember { mutableStateOf(false) }
+    var showRegistryDialog by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("All") }
 
     val configuration = LocalConfiguration.current
@@ -75,14 +76,25 @@ fun McpSkillsScreen(
                     color = Color.Gray
                 )
             }
-            Button(
-                onClick = { showAddServerDialog = true },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.testTag("add_mcp_server_button")
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add MCP Server", fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { showRegistryDialog = true },
+                    modifier = Modifier.testTag("browse_registry_button")
+                ) {
+                    Icon(Icons.Rounded.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Registry", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = { showAddServerDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.testTag("add_mcp_server_button")
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add MCP Server", fontSize = 12.sp)
+                }
             }
         }
 
@@ -157,6 +169,16 @@ fun McpSkillsScreen(
                 onToggleSkill = { viewModel.toggleClaudeSkill(it) }
             )
         }
+    }
+
+    if (showRegistryDialog) {
+        RegistryBrowserDialog(
+            viewModel = viewModel,
+            onDismiss = {
+                showRegistryDialog = false
+                viewModel.clearRegistrySearch()
+            }
+        )
     }
 
     if (showAddServerDialog) {
