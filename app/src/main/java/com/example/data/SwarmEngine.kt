@@ -391,7 +391,8 @@ class SwarmEngine(
         val skillsContext = if (activeSkills.isNotEmpty()) {
             "\n[AVAILABLE SYSTEM TOOLS & MCP SKILLS]\n" +
             activeSkills.joinToString("\n") { skill ->
-                "- [${skill.category}] Tool: ${skill.name} (Requires MCP Link: ${skill.requiredMcpServerType}). Description: ${skill.description}. Example Usage: ${skill.usageExample}"
+                val invokeName = skill.sourceToolName ?: skill.name
+                "- [${skill.category}] Tool: ${skill.name} (invoke as '$invokeName'; Requires MCP Link: ${skill.requiredMcpServerType}). Description: ${skill.description}. Example Usage: ${skill.usageExample}"
             } + "\nTo actually invoke one of these tools, emit a line in this exact format: " +
             "MCP_CALL: <tool name> | <json arguments object>. " +
             "The call only succeeds if the tool's MCP server is currently Connected; otherwise it will fail for real. " +
@@ -549,8 +550,12 @@ class SwarmEngine(
         val skillName = parts.getOrNull(0)?.trim().orEmpty()
         val argsJson = parts.getOrNull(1)?.trim().orEmpty()
 
+        // Resolve skill by display name or by the bound MCP tool name
         val skill = db.claudeSkillDao().getAllSkillsSync()
-            .firstOrNull { it.name.equals(skillName, ignoreCase = true) && it.isEnabled }
+            .firstOrNull {
+                (it.name.equals(skillName, ignoreCase = true) || it.sourceToolName.equals(skillName, ignoreCase = true))
+                        && it.isEnabled
+            }
         if (skill == null) {
             db.taskStepDao().insertStep(
                 TaskStep(
@@ -573,17 +578,35 @@ class SwarmEngine(
                     agentName = "MCP Tool",
                     agentRole = "System",
                     actionType = "MCP_CALL_FAILED",
-                    content = "$agentName tried to call '$skillName' but no Connected MCP server of type '${skill.requiredMcpServerType}' is available."
+                    content = "$agentName tried to call '${skill.name}' but no Connected MCP server of type '${skill.requiredMcpServerType}' is available."
                 )
             )
             return
         }
 
         val arguments = parseJsonArguments(argsJson)
+
+        // Validate required arguments against the stored input schema
+        val toolName = skill.sourceToolName ?: skill.name
+        val toolEntity = db.mcpToolDao().getToolByName(toolName)
+        val missingRequired = validateRequiredArgs(toolEntity, arguments)
+        if (missingRequired.isNotEmpty()) {
+            db.taskStepDao().insertStep(
+                TaskStep(
+                    taskId = taskId,
+                    agentName = "MCP Tool",
+                    agentRole = "System",
+                    actionType = "MCP_CALL_FAILED",
+                    content = "$agentName's call to '${skill.name}' is missing required arguments: ${missingRequired.joinToString(", ")}."
+                )
+            )
+            return
+        }
+
         val authToken = SecurePrefs.getMcpToken(appContext, server.id)
 
         val outcome = mcpClient.initialize(server.sourceUrl, authToken).mapCatching { session ->
-            mcpClient.callTool(server.sourceUrl, session, authToken, skill.name, arguments).getOrThrow()
+            mcpClient.callTool(server.sourceUrl, session, authToken, toolName, arguments).getOrThrow()
         }
 
         outcome.fold(
@@ -594,7 +617,7 @@ class SwarmEngine(
                         agentName = "MCP Tool",
                         agentRole = "System",
                         actionType = "MCP_TOOL_CALL",
-                        content = "$agentName called '$skillName' on ${server.name}. Result: $toolResult"
+                        content = "$agentName called '${skill.name}' ($toolName) on ${server.name}. Result: $toolResult"
                     )
                 )
             },
@@ -605,11 +628,21 @@ class SwarmEngine(
                         agentName = "MCP Tool",
                         agentRole = "System",
                         actionType = "MCP_CALL_FAILED",
-                        content = "$agentName's call to '$skillName' on ${server.name} failed: ${error.message}"
+                        content = "$agentName's call to '${skill.name}' ($toolName) on ${server.name} failed: ${error.message}"
                     )
                 )
             }
         )
+    }
+
+    private fun validateRequiredArgs(toolEntity: McpToolEntity?, arguments: Map<String, Any?>): List<String> {
+        if (toolEntity == null) return emptyList()
+        val schema = parseJsonArguments(toolEntity.inputSchemaJson)
+        @Suppress("UNCHECKED_CAST")
+        val required = (schema["required"] as? List<String>).orEmpty()
+        return required.filter { argName ->
+            arguments[argName] == null || arguments[argName] == "" || arguments[argName] == emptyList<Any>()
+        }
     }
 
     private fun parseJsonArguments(argsJson: String): Map<String, Any?> {

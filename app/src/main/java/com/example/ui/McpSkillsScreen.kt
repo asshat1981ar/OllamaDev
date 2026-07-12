@@ -166,7 +166,7 @@ fun McpSkillsScreen(
         var configJson by remember { mutableStateOf("{}") }
         var authToken by remember { mutableStateOf("") }
 
-        val serverTypes = listOf("GitHub", "Docker", "Database", "Slack", "Filesystem")
+        val serverTypes = listOf("Gateway", "GitHub", "Docker", "Database", "Browser", "Search", "Slack", "Filesystem")
 
         AlertDialog(
             onDismissRequest = { showAddServerDialog = false },
@@ -477,9 +477,14 @@ fun McpServersSection(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(
                                     imageVector = when (server.type) {
+                                        "Gateway" -> Icons.Rounded.Hub
                                         "GitHub" -> Icons.Rounded.AccountTree
                                         "Docker" -> Icons.Rounded.Inbox
                                         "Database" -> Icons.Rounded.Storage
+                                        "Browser" -> Icons.Rounded.TravelExplore
+                                        "Search" -> Icons.Rounded.Search
+                                        "Slack" -> Icons.Rounded.ChatBubble
+                                        "Filesystem" -> Icons.Rounded.Folder
                                         else -> Icons.Rounded.Extension
                                     },
                                     contentDescription = null,

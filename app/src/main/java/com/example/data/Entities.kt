@@ -99,6 +99,17 @@ data class McpServer(
     val configuredParams: String = "{}" // Configuration parameters in JSON
 )
 
+@Entity(tableName = "mcp_tools")
+data class McpToolEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val serverId: Int,
+    val name: String,
+    val description: String?,
+    val inputSchemaJson: String = "{}",
+    val outputSchemaJson: String? = null,
+    val annotationsJson: String? = null
+)
+
 @Entity(tableName = "claude_skills")
 data class ClaudeSkill(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
@@ -108,6 +119,7 @@ data class ClaudeSkill(
     val isRecommended: Boolean = false,
     val isEnabled: Boolean = false,
     val usageExample: String = "",
-    val requiredMcpServerType: String = "None"
+    val requiredMcpServerType: String = "None",
+    val sourceToolName: String? = null // Binds this skill to a real MCP tool name
 )
 

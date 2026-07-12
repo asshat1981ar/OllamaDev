@@ -17,9 +17,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ChatMessage::class,
         GitCommit::class,
         McpServer::class,
+        McpToolEntity::class,
         ClaudeSkill::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun gitCommitDao(): GitCommitDao
     abstract fun mcpServerDao(): McpServerDao
+    abstract fun mcpToolDao(): McpToolDao
     abstract fun claudeSkillDao(): ClaudeSkillDao
 
     companion object {
@@ -119,38 +121,36 @@ abstract class AppDatabase : RoomDatabase() {
                 """.trimIndent()
             )
 
-            // Seed MCP Servers. These are placeholders (example — replace with a real MCP
-            // endpoint): the app now has a real Streamable-HTTP MCP client (McpClient.kt), but
-            // Android can't spawn local/stdio MCP servers, so these seeded URLs (doc links, not
-            // live servers) can't actually connect. Seeded "Disconnected" -- a real "Connected"
-            // status is only ever set after a genuine initialize+tools/list handshake succeeds.
+            // Seed MCP Servers. Because Android cannot spawn local stdio MCP servers, these URLs
+            // point to example local/self-hosted Streamable-HTTP endpoints (e.g. a gateway or bridge).
+            // A real "Connected" status is only set after a genuine initialize+tools/list handshake.
             db.execSQL(
                 """
                 INSERT INTO mcp_servers (id, name, type, sourceUrl, status, toolsCount, configuredParams) VALUES
-                (1, 'GitHub MCP Integration (example — replace with a real MCP endpoint)', 'GitHub', 'https://github.com/modelcontextprotocol/servers/tree/main/src/github', 'Disconnected', 0, '{"repo":"example-repo","token":"ghp_xxxxxxxxxxxx"}'),
-                (2, 'Docker Container Engine (example — replace with a real MCP endpoint)', 'Docker', 'https://github.com/modelcontextprotocol/servers/tree/main/src/docker', 'Disconnected', 0, '{"host":"unix:///var/run/docker.sock"}'),
-                (3, 'PostgreSQL Database Analyzer (example — replace with a real MCP endpoint)', 'Database', 'https://github.com/modelcontextprotocol/servers/tree/main/src/postgres', 'Disconnected', 0, '{"connectionString":"postgresql://localhost:5432/production"}'),
-                (4, 'Puppeteer Browser Automation (example — replace with a real MCP endpoint)', 'Docker', 'https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer', 'Disconnected', 0, '{"headless":true}')
+                (1, 'Local MCP Gateway', 'Gateway', 'http://localhost:3000/mcp', 'Disconnected', 0, '{}'),
+                (2, 'SearXNG Search Bridge', 'Search', 'http://localhost:3002/mcp', 'Disconnected', 0, '{}'),
+                (3, 'Private GitHub MCP', 'GitHub', 'http://localhost:3003/mcp', 'Disconnected', 0, '{"repo":"owner/repo"}'),
+                (4, 'Workspace Postgres', 'Database', 'http://localhost:3004/mcp', 'Disconnected', 0, '{"connectionString":"postgresql://localhost:5432/app"}'),
+                (5, 'Browser Automation', 'Browser', 'http://localhost:3005/mcp', 'Disconnected', 0, '{"headless":true}')
                 """.trimIndent()
             )
 
-            // Seed Claude Skills. Skills 7-10 previously required a "Filesystem" MCP server type
-            // that never represented a real MCP concept (git/gradle aren't MCP servers) -- they
-            // map to the native GitService/local compilation features instead, so they don't
-            // require any MCP server connection.
+            // Seed Claude Skills. Skills 7-10 map to native GitService/local compilation features
+            // instead of MCP servers, so they don't require any MCP server connection.
+            // sourceToolName is NULL for manually authored skills; auto-generated skills bind to real MCP tool names.
             db.execSQL(
                 """
-                INSERT INTO claude_skills (id, name, description, category, isRecommended, isEnabled, usageExample, requiredMcpServerType) VALUES
-                (1, 'GitHub Search & Pull', 'Search and manage issues, pull requests, and repositories using the GitHub MCP client.', 'Development', 1, 1, 'Search pull requests with query "bugfix" in example-repo', 'GitHub'),
-                (2, 'Docker Lifecycle Monitor', 'Monitor docker containers, list active tasks, view performance graphs, and inspect configurations.', 'Automation', 1, 1, 'List running docker containers and show port mappings', 'Docker'),
-                (3, 'Postgres SQL Optimizer', 'Examine Postgres schemas, run EXPLAIN queries, and automatically optimize database indexes.', 'Analysis', 0, 0, 'Analyze table "users" and recommend optimal column indexes', 'Database'),
-                (4, 'Automated Integration Tester', 'Simulate end-to-end user actions in headful browser environments using Puppeteer scripts.', 'Automation', 1, 0, 'Run Puppeteer E2E tests against live dev server on localhost:3000', 'Docker'),
-                (5, 'Code Linter & Formatter', 'Fast sandboxed syntax check, format, and style linting on code blocks prior to commits.', 'Development', 1, 1, 'Lint current active python or JS files with formatting recommendations', 'None'),
-                (6, 'Research Web Crawler', 'Leverage Brave / Google Search MCP server to browse, clean, and summarize web documentation.', 'Productivity', 1, 0, 'Summarize latest Jetpack Compose Room integration features', 'None'),
-                (7, 'Git Branch Creator', 'Create and check out new local Git branches for code tasks.', 'Development', 1, 1, 'git branch feature/auth-fix', 'None'),
-                (8, 'Git Auto-Stager & Committer', 'Stage modified files and write clean conventional commits automatically.', 'Development', 1, 1, 'git commit -am "feat: add user authentication tokens"', 'None'),
-                (9, 'Automated Compiler Self-Healer', 'Verify Kotlin compilation and run auto-repair loops on code errors.', 'Automation', 1, 1, 'Check kotlin compilation syntax and run healing loop', 'None'),
-                (10, 'Gradle Test Runner', 'Run local Gradle test tasks and parse trace reports.', 'Automation', 1, 1, 'gradle test :app', 'None')
+                INSERT INTO claude_skills (id, name, description, category, isRecommended, isEnabled, usageExample, requiredMcpServerType, sourceToolName) VALUES
+                (1, 'GitHub Search & Pull', 'Search and manage issues, pull requests, and repositories using the GitHub MCP client.', 'Development', 1, 1, 'Search pull requests with query "bugfix" in example-repo', 'GitHub', NULL),
+                (2, 'Docker Lifecycle Monitor', 'Monitor docker containers, list active tasks, view performance graphs, and inspect configurations.', 'Automation', 1, 1, 'List running docker containers and show port mappings', 'Docker', NULL),
+                (3, 'Postgres SQL Optimizer', 'Examine Postgres schemas, run EXPLAIN queries, and automatically optimize database indexes.', 'Analysis', 0, 0, 'Analyze table "users" and recommend optimal column indexes', 'Database', NULL),
+                (4, 'Automated Integration Tester', 'Simulate end-to-end user actions in headful browser environments using Puppeteer scripts.', 'Automation', 1, 0, 'Run Puppeteer E2E tests against live dev server on localhost:3000', 'Browser', NULL),
+                (5, 'Code Linter & Formatter', 'Fast sandboxed syntax check, format, and style linting on code blocks prior to commits.', 'Development', 1, 1, 'Lint current active python or JS files with formatting recommendations', 'None', NULL),
+                (6, 'Research Web Crawler', 'Leverage Brave / Google Search MCP server to browse, clean, and summarize web documentation.', 'Productivity', 1, 0, 'Summarize latest Jetpack Compose Room integration features', 'None', NULL),
+                (7, 'Git Branch Creator', 'Create and check out new local Git branches for code tasks.', 'Development', 1, 1, 'git branch feature/auth-fix', 'None', NULL),
+                (8, 'Git Auto-Stager & Committer', 'Stage modified files and write clean conventional commits automatically.', 'Development', 1, 1, 'git commit -am "feat: add user authentication tokens"', 'None', NULL),
+                (9, 'Automated Compiler Self-Healer', 'Verify Kotlin compilation and run auto-repair loops on code errors.', 'Automation', 1, 1, 'Check kotlin compilation syntax and run healing loop', 'None', NULL),
+                (10, 'Gradle Test Runner', 'Run local Gradle test tasks and parse trace reports.', 'Automation', 1, 1, 'gradle test :app', 'None', NULL)
                 """.trimIndent()
             )
         }

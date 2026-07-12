@@ -15,7 +15,13 @@ import java.util.concurrent.atomic.AtomicLong
 private const val MCP_PROTOCOL_VERSION = "2025-06-18"
 
 data class McpSession(val sessionId: String?, val protocolVersion: String)
-data class McpTool(val name: String, val description: String?)
+data class McpTool(
+    val name: String,
+    val description: String?,
+    val inputSchema: Map<String, Any?>? = null,
+    val outputSchema: Map<String, Any?>? = null,
+    val annotations: Map<String, Any?>? = null
+)
 
 /**
  * Minimal MCP Streamable HTTP client (https://modelcontextprotocol.io). Android apps can't
@@ -88,6 +94,10 @@ class McpClient {
         return jsonObjectAdapter.fromJson(text) ?: throw IllegalStateException("Invalid JSON-RPC response")
     }
 
+    fun toJsonString(value: Map<String, Any?>?): String? {
+        return value?.let { jsonObjectAdapter.toJson(it) }
+    }
+
     private fun extractError(parsed: Map<String, Any?>): String? {
         @Suppress("UNCHECKED_CAST")
         val error = parsed["error"] as? Map<String, Any?> ?: return null
@@ -152,8 +162,15 @@ class McpClient {
                     val result = parsed["result"] as? Map<String, Any?>
                     @Suppress("UNCHECKED_CAST")
                     val toolsList = (result?.get("tools") as? List<Map<String, Any?>>).orEmpty()
-                    val tools = toolsList.map {
-                        McpTool(name = it["name"] as? String ?: "unknown", description = it["description"] as? String)
+                    val tools = toolsList.map { toolMap ->
+                        @Suppress("UNCHECKED_CAST")
+                        McpTool(
+                            name = toolMap["name"] as? String ?: "unknown",
+                            description = toolMap["description"] as? String,
+                            inputSchema = toolMap["inputSchema"] as? Map<String, Any?>,
+                            outputSchema = toolMap["outputSchema"] as? Map<String, Any?>,
+                            annotations = toolMap["annotations"] as? Map<String, Any?>
+                        )
                     }
                     Result.success(tools)
                 }
