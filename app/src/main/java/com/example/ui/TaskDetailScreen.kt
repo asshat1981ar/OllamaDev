@@ -8,9 +8,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -53,245 +57,480 @@ fun TaskDetailScreen(
         }
     }
 
-    Row(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Left Column: Historic Tasks List (35% width)
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .weight(1f)
-                .padding(12.dp)
+    val configuration = LocalConfiguration.current
+    val isExpanded = configuration.screenWidthDp >= 600
+
+    if (isExpanded) {
+        // Expanded Tablet layout: 2-column side-by-side
+        Row(
+            modifier = modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            Text(
-                text = "EXECUTION HISTORIES",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            if (tasks.isEmpty()) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    Text(
-                        text = "No prior runs.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                }
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    items(tasks, key = { it.id }) { task ->
-                        HistoryTaskRow(
-                            task = task,
-                            isSelected = selectedTaskId == task.id,
-                            onClick = { viewModel.selectTask(task.id) },
-                            onDelete = { viewModel.deleteTask(task) }
+            // Left Column: Historic Tasks List (35% width)
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1f)
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = "EXECUTION HISTORIES",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                if (tasks.isEmpty()) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "No prior runs.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                         )
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    ) {
+                        items(tasks, key = { it.id }) { task ->
+                            HistoryTaskRow(
+                                task = task,
+                                isSelected = selectedTaskId == task.id,
+                                onClick = { viewModel.selectTask(task.id) },
+                                onDelete = { viewModel.deleteTask(task) }
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        VerticalDivider(color = Color(0xFF1F293D))
+            VerticalDivider(color = Color(0xFF1F293D))
 
-        // Right Column: Workspace Console & Task Steps Timeline (65% width)
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .weight(1.8f)
-                .padding(16.dp)
-        ) {
-            if (selectedTaskId == null) {
-                // Task Dispatcher View
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Terminal,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Swarm Workspace Console",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Dispatch a new task or select a past history item from the left.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        modifier = Modifier.padding(horizontal = 32.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
-                    
-                    // Task Submission Card
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            // Right Column: Workspace Console & Task Steps Timeline (65% width)
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1.8f)
+                    .padding(16.dp)
+            ) {
+                if (selectedTaskId == null) {
+                    // Task Dispatcher View
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // Selector Dropdown
-                            Box {
-                                OutlinedButton(
-                                    onClick = { dropdownExpanded = true },
-                                    modifier = Modifier.fillMaxWidth().testTag("select_swarm_dropdown")
+                        Icon(
+                            imageVector = Icons.Rounded.Terminal,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Swarm Workspace Console",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Dispatch a new task or select a past history item from the left.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(horizontal = 32.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        
+                        // Task Submission Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                // Selector Dropdown
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { dropdownExpanded = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("select_swarm_dropdown")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(selectedSwarm?.name ?: "Select Swarm Pipeline", fontSize = 13.sp)
+                                            Icon(imageVector = Icons.Rounded.ArrowDropDown, contentDescription = null)
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = dropdownExpanded,
+                                        onDismissRequest = { dropdownExpanded = false }
+                                    ) {
+                                        swarms.forEach { swarm ->
+                                            DropdownMenuItem(
+                                                text = { Text(swarm.name) },
+                                                onClick = {
+                                                    selectedSwarm = swarm
+                                                    dropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Prompt field
+                                OutlinedTextField(
+                                    value = promptInput,
+                                    onValueChange = { promptInput = it },
+                                    label = { Text("Task Instructions / Prompt") },
+                                    placeholder = { Text("Describe what the swarm should solve...") },
+                                    modifier = Modifier.fillMaxWidth().testTag("swarm_prompt_input")
+                                )
+
+                                // Submit Button
+                                Button(
+                                    onClick = {
+                                        val swarm = selectedSwarm
+                                        if (swarm != null && promptInput.isNotEmpty()) {
+                                            viewModel.runSwarm(swarm, promptInput)
+                                            promptInput = ""
+                                        }
+                                    },
+                                    enabled = selectedSwarm != null && promptInput.isNotEmpty() && !isExecuting,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth().testTag("dispatch_swarm_button")
                                 ) {
+                                    if (isExecuting) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black)
+                                    } else {
+                                        Icon(imageVector = Icons.Rounded.PlayArrow, contentDescription = "Run Swarm")
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Dispatch Swarm")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Steps Timeline View for Selected Task
+                    val selectedTask = tasks.find { it.id == selectedTaskId }
+                    
+                    if (selectedTask != null) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Task Header
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(selectedSwarm?.name ?: "Select Swarm Pipeline", fontSize = 13.sp)
-                                        Icon(imageVector = Icons.Rounded.ArrowDropDown, contentDescription = null)
+                                        Text(
+                                            text = selectedTask.swarmName.uppercase(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        
+                                        IconButton(
+                                            onClick = { viewModel.selectTask(null) },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(imageVector = Icons.Rounded.Close, contentDescription = "Close Workspace", modifier = Modifier.size(16.dp))
+                                        }
                                     }
-                                }
-                                DropdownMenu(
-                                    expanded = dropdownExpanded,
-                                    onDismissRequest = { dropdownExpanded = false }
-                                ) {
-                                    swarms.forEach { swarm ->
-                                        DropdownMenuItem(
-                                            text = { Text(swarm.name) },
-                                            onClick = {
-                                                selectedSwarm = swarm
-                                                dropdownExpanded = false
-                                            }
+                                    Text(
+                                        text = selectedTask.prompt,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        HeaderStatLabel(icon = Icons.Rounded.Schedule, label = "${selectedTask.executionTimeMs / 1000f}s")
+                                        HeaderStatLabel(icon = Icons.Rounded.ConfirmationNumber, label = "${selectedTask.tokenUsage} tkn")
+                                        
+                                        val statColor = when (selectedTask.status) {
+                                            "Completed" -> Color(0xFF4ADE80)
+                                            "Failed" -> Color(0xFFEF4444)
+                                            else -> Color(0xFFFACC15)
+                                        }
+                                        Text(
+                                            text = selectedTask.status.uppercase(),
+                                            color = statColor,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
                                         )
                                     }
                                 }
                             }
 
-                            // Prompt field
-                            OutlinedTextField(
-                                value = promptInput,
-                                onValueChange = { promptInput = it },
-                                label = { Text("Task Instructions / Prompt") },
-                                placeholder = { Text("Describe what the swarm should solve...") },
-                                modifier = Modifier.fillMaxWidth().testTag("swarm_prompt_input")
-                            )
-
-                            // Submit Button
-                            Button(
-                                onClick = {
-                                    val swarm = selectedSwarm
-                                    if (swarm != null && promptInput.isNotEmpty()) {
-                                        viewModel.runSwarm(swarm, promptInput)
-                                        promptInput = ""
-                                    }
-                                },
-                                enabled = selectedSwarm != null && promptInput.isNotEmpty() && !isExecuting,
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth().testTag("dispatch_swarm_button")
+                            // Steps List
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth()
                             ) {
-                                if (isExecuting) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black)
-                                } else {
-                                    Icon(imageVector = Icons.Rounded.PlayArrow, contentDescription = "Run Swarm")
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Dispatch Swarm")
+                                items(activeSteps, key = { it.id }) { step ->
+                                    TaskStepTimelineItem(step)
+                                }
+                                
+                                if (isExecuting && activeSteps.isNotEmpty() && activeSteps.lastOrNull()?.actionType != "FINAL_RESPONSE") {
+                                    item {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                                Text("Swarm processing next agent pipeline step...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                // Steps Timeline View for Selected Task
-                val selectedTask = tasks.find { it.id == selectedTaskId }
-                
-                if (selectedTask != null) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // Task Header
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
+            }
+        }
+    } else {
+        // Compact Device (Phone) Layout: Single Column Stacked / Switchable
+        if (selectedTaskId == null) {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Title and description
+                Column {
+                    Text(
+                        text = "SWARM WORKSPACE CONSOLE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp
+                    )
+                    Text(
+                        text = "Dispatch a new task to your active swarm configurations.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+
+                // Task Submission Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Selector Dropdown
+                        Box {
+                            OutlinedButton(
+                                onClick = { dropdownExpanded = true },
+                                modifier = Modifier.fillMaxWidth().testTag("select_swarm_dropdown")
+                            ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = selectedTask.swarmName.uppercase(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    
-                                    IconButton(
-                                        onClick = { viewModel.selectTask(null) },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(imageVector = Icons.Rounded.Close, contentDescription = "Close Workspace", modifier = Modifier.size(16.dp))
-                                    }
+                                    Text(selectedSwarm?.name ?: "Select Swarm Pipeline", fontSize = 13.sp)
+                                    Icon(imageVector = Icons.Rounded.ArrowDropDown, contentDescription = null)
                                 }
-                                Text(
-                                    text = selectedTask.prompt,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    HeaderStatLabel(icon = Icons.Rounded.Schedule, label = "${selectedTask.executionTimeMs / 1000f}s")
-                                    HeaderStatLabel(icon = Icons.Rounded.ConfirmationNumber, label = "${selectedTask.tokenUsage} tkn")
-                                    
-                                    val statColor = when (selectedTask.status) {
-                                        "Completed" -> Color(0xFF4ADE80)
-                                        "Failed" -> Color(0xFFEF4444)
-                                        else -> Color(0xFFFACC15)
-                                    }
-                                    Text(
-                                        text = selectedTask.status.uppercase(),
-                                        color = statColor,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp
+                            }
+                            DropdownMenu(
+                                expanded = dropdownExpanded,
+                                onDismissRequest = { dropdownExpanded = false }
+                            ) {
+                                swarms.forEach { swarm ->
+                                    DropdownMenuItem(
+                                        text = { Text(swarm.name) },
+                                        onClick = {
+                                            selectedSwarm = swarm
+                                            dropdownExpanded = false
+                                        }
                                     )
                                 }
                             }
                         }
 
-                        // Steps List
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        // Prompt field
+                        OutlinedTextField(
+                            value = promptInput,
+                            onValueChange = { promptInput = it },
+                            label = { Text("Task Instructions / Prompt") },
+                            placeholder = { Text("Describe what the swarm should solve...") },
+                            modifier = Modifier.fillMaxWidth().testTag("swarm_prompt_input")
+                        )
+
+                        // Submit Button
+                        Button(
+                            onClick = {
+                                val swarm = selectedSwarm
+                                if (swarm != null && promptInput.isNotEmpty()) {
+                                    viewModel.runSwarm(swarm, promptInput)
+                                    promptInput = ""
+                                }
+                            },
+                            enabled = selectedSwarm != null && promptInput.isNotEmpty() && !isExecuting,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().testTag("dispatch_swarm_button")
                         ) {
-                            items(activeSteps, key = { it.id }) { step ->
-                                TaskStepTimelineItem(step)
+                            if (isExecuting) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black)
+                            } else {
+                                Icon(imageVector = Icons.Rounded.PlayArrow, contentDescription = "Run Swarm")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Dispatch Swarm")
                             }
-                            
-                            if (isExecuting && activeSteps.isNotEmpty() && activeSteps.lastOrNull()?.actionType != "FINAL_RESPONSE") {
-                                item {
-                                    Box(
-                                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                                        contentAlignment = Alignment.Center
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                HorizontalDivider(color = Color(0xFF1F293D))
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Execution History section
+                Text(
+                    text = "EXECUTION HISTORIES",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+
+                if (tasks.isEmpty()) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                    ) {
+                        Text(
+                            text = "No prior runs.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        tasks.forEach { task ->
+                            HistoryTaskRow(
+                                task = task,
+                                isSelected = false,
+                                onClick = { viewModel.selectTask(task.id) },
+                                onDelete = { viewModel.deleteTask(task) }
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Selected Task steps timeline view (Mobile layout)
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(16.dp)
+            ) {
+                val selectedTask = tasks.find { it.id == selectedTaskId }
+                
+                if (selectedTask != null) {
+                    // Task Header Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = selectedTask.swarmName.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                
+                                IconButton(
+                                    onClick = { viewModel.selectTask(null) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(imageVector = Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to Console", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Text(
+                                text = selectedTask.prompt,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                HeaderStatLabel(icon = Icons.Rounded.Schedule, label = "${selectedTask.executionTimeMs / 1000f}s")
+                                HeaderStatLabel(icon = Icons.Rounded.ConfirmationNumber, label = "${selectedTask.tokenUsage} tkn")
+                                
+                                val statColor = when (selectedTask.status) {
+                                    "Completed" -> Color(0xFF4ADE80)
+                                    "Failed" -> Color(0xFFEF4444)
+                                    else -> Color(0xFFFACC15)
+                                }
+                                Text(
+                                    text = selectedTask.status.uppercase(),
+                                    color = statColor,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // Timeline Steps List
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    ) {
+                        items(activeSteps, key = { it.id }) { step ->
+                            TaskStepTimelineItem(step)
+                        }
+                        
+                        if (isExecuting && activeSteps.isNotEmpty() && activeSteps.lastOrNull()?.actionType != "FINAL_RESPONSE") {
+                            item {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                            Text("Swarm processing next agent pipeline step...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                                        }
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        Text("Swarm processing next agent pipeline step...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                                     }
                                 }
                             }

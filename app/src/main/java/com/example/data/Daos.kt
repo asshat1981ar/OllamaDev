@@ -107,11 +107,23 @@ interface WorkspaceFileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFile(file: WorkspaceFile): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFilesBatch(files: List<WorkspaceFile>)
+
     @Update
     suspend fun updateFile(file: WorkspaceFile)
 
     @Delete
     suspend fun deleteFile(file: WorkspaceFile)
+
+    @Delete
+    suspend fun deleteFilesBatch(files: List<WorkspaceFile>)
+
+    @Transaction
+    suspend fun syncFilesTransaction(filesToInsert: List<WorkspaceFile>, filesToDelete: List<WorkspaceFile>) {
+        insertFilesBatch(filesToInsert)
+        deleteFilesBatch(filesToDelete)
+    }
 
     @Query("DELETE FROM workspace_files")
     suspend fun deleteAllFiles()
@@ -146,6 +158,9 @@ interface McpServerDao {
     @Query("SELECT * FROM mcp_servers ORDER BY name ASC")
     fun getAllServers(): Flow<List<McpServer>>
 
+    @Query("SELECT * FROM mcp_servers")
+    suspend fun getAllServersSync(): List<McpServer>
+
     @Query("SELECT * FROM mcp_servers WHERE id = :id")
     suspend fun getServerById(id: Int): McpServer?
 
@@ -167,6 +182,9 @@ interface ClaudeSkillDao {
     @Query("SELECT * FROM claude_skills ORDER BY name ASC")
     fun getAllSkills(): Flow<List<ClaudeSkill>>
 
+    @Query("SELECT * FROM claude_skills")
+    suspend fun getAllSkillsSync(): List<ClaudeSkill>
+
     @Query("SELECT * FROM claude_skills WHERE isRecommended = 1")
     fun getRecommendedSkills(): Flow<List<ClaudeSkill>>
 
@@ -178,6 +196,12 @@ interface ClaudeSkillDao {
 
     @Query("UPDATE claude_skills SET isEnabled = :isEnabled WHERE id = :id")
     suspend fun setSkillEnabled(id: Int, isEnabled: Boolean)
+
+    @Query("UPDATE claude_skills SET isRecommended = :isRec WHERE requiredMcpServerType = :mcpType")
+    suspend fun updateRecommendationByServerType(mcpType: String, isRec: Boolean)
+
+    @Query("UPDATE claude_skills SET isEnabled = :isEnabled WHERE requiredMcpServerType = :mcpType")
+    suspend fun setSkillEnabledByServerType(mcpType: String, isEnabled: Boolean)
 
     @Query("DELETE FROM claude_skills")
     suspend fun clearAllSkills()

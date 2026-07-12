@@ -2,9 +2,15 @@ package com.example.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
-class SwarmEngine(private val db: AppDatabase) {
+class SwarmEngine(
+    private val db: AppDatabase,
+    private val gitService: GitService,
+    private val mcpClient: McpClient,
+    private val appContext: android.content.Context
+) {
 
     suspend fun executeTask(config: SwarmConfig, userPrompt: String): Int = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
@@ -35,6 +41,7 @@ class SwarmEngine(private val db: AppDatabase) {
                 "SEQUENTIAL" -> runSequentialWorkflow(taskId, swarmAgents, userPrompt)
                 "PEER_TO_PEER" -> runPeerToPeerWorkflow(taskId, swarmAgents, userPrompt)
                 "CONSENSUS_VOTE" -> runConsensusVoteWorkflow(taskId, swarmAgents, userPrompt)
+                "DYNAMIC_ROUTING" -> runDynamicRoutingWorkflow(taskId, swarmAgents, userPrompt)
                 else -> runSequentialWorkflow(taskId, swarmAgents, userPrompt)
             }
 
@@ -114,6 +121,9 @@ class SwarmEngine(private val db: AppDatabase) {
             AgentStateStore.setAgentActive(agent.id, true, "Generating")
             val agentOutput = generateOutputForAgent(agent, promptForAgent)
             
+            // Intercept and run any Git commands proposed by the agent
+            parseAndExecuteAgenticActions(taskId, agent.name, agentOutput)
+
             // Update Step with finished output
             db.taskStepDao().insertStep(
                 TaskStep(
@@ -160,6 +170,8 @@ class SwarmEngine(private val db: AppDatabase) {
         
         val researchPrompt = "Analyze and research requirements for: $userPrompt"
         val researchResult = generateOutputForAgent(researcher, researchPrompt)
+        parseAndExecuteAgenticActions(taskId, researcher.name, researchResult)
+        
         db.taskStepDao().insertStep(
             TaskStep(
                 taskId = taskId,
@@ -198,6 +210,8 @@ class SwarmEngine(private val db: AppDatabase) {
         
         val codePrompt = "Write the technical system or code matching: $userPrompt\nResearch context:\n$researchResult"
         val codeResult = generateOutputForAgent(programmer, codePrompt)
+        parseAndExecuteAgenticActions(taskId, programmer.name, codeResult)
+        
         db.taskStepDao().insertStep(
             TaskStep(
                 taskId = taskId,
@@ -236,6 +250,8 @@ class SwarmEngine(private val db: AppDatabase) {
         
         val criticPrompt = "Audit this solution. Find issues, security leaks or logic flaws:\nResearch: $researchResult\nCode: $codeResult"
         val auditResult = generateOutputForAgent(critic, criticPrompt)
+        parseAndExecuteAgenticActions(taskId, critic.name, auditResult)
+        
         db.taskStepDao().insertStep(
             TaskStep(
                 taskId = taskId,
@@ -274,6 +290,8 @@ class SwarmEngine(private val db: AppDatabase) {
         
         val execPrompt = "Synthesize the research, code, and critic audit into a final premium response to: $userPrompt\n\nFull workspace history:\n$context"
         val finalResult = generateOutputForAgent(executive, execPrompt)
+        parseAndExecuteAgenticActions(taskId, executive.name, finalResult)
+        
         db.taskStepDao().insertStep(
             TaskStep(
                 taskId = taskId,
@@ -312,6 +330,8 @@ class SwarmEngine(private val db: AppDatabase) {
             
             val proposalPrompt = "Propose an answers to: $userPrompt"
             val output = generateOutputForAgent(agent, proposalPrompt)
+            parseAndExecuteAgenticActions(taskId, agent.name, output)
+            
             db.taskStepDao().insertStep(
                 TaskStep(
                     taskId = taskId,
@@ -367,15 +387,31 @@ class SwarmEngine(private val db: AppDatabase) {
     }
 
     private suspend fun generateOutputForAgent(agent: Agent, prompt: String): String {
+        val activeSkills = db.claudeSkillDao().getAllSkillsSync().filter { it.isEnabled }
+        val skillsContext = if (activeSkills.isNotEmpty()) {
+            "\n[AVAILABLE SYSTEM TOOLS & MCP SKILLS]\n" +
+            activeSkills.joinToString("\n") { skill ->
+                "- [${skill.category}] Tool: ${skill.name} (Requires MCP Link: ${skill.requiredMcpServerType}). Description: ${skill.description}. Example Usage: ${skill.usageExample}"
+            } + "\nTo actually invoke one of these tools, emit a line in this exact format: " +
+            "MCP_CALL: <tool name> | <json arguments object>. " +
+            "The call only succeeds if the tool's MCP server is currently Connected; otherwise it will fail for real. " +
+            "Do not fabricate or narrate tool output yourself -- only the MCP_CALL directive produces real results.\n"
+        } else {
+            ""
+        }
+        val systemPromptWithSkills = agent.systemPrompt + skillsContext
+
         try {
             val nodes = db.ollamaNodeDao().getAllNodesSync()
             
-            // Find an online node that matches the agent's modelName or serves it
-            val onlineNode = nodes.firstOrNull { node ->
+            // Find all matching online nodes and select the one with the lowest latency (load balancer)
+            val onlineNode = nodes.filter { node ->
                 node.status == "Online" && 
                 (node.availableModels.split(",").map { it.trim().lowercase() }.any { 
                     it.contains(agent.modelName.lowercase()) || agent.modelName.lowercase().contains(it)
                 } || agent.modelName.lowercase().contains(node.name.lowercase()))
+            }.minByOrNull { node ->
+                if (node.latencyMs > 0) node.latencyMs else 999999
             }
             
             if (onlineNode != null) {
@@ -383,7 +419,8 @@ class SwarmEngine(private val db: AppDatabase) {
                     nodeUrl = onlineNode.url,
                     modelName = agent.modelName,
                     prompt = prompt,
-                    systemPrompt = agent.systemPrompt
+                    systemPrompt = systemPromptWithSkills,
+                    apiKey = resolveApiKeyForNode(onlineNode)
                 )
                 if (response != null && response.isNotEmpty()) {
                     return response
@@ -394,7 +431,326 @@ class SwarmEngine(private val db: AppDatabase) {
         }
         
         // Fallback to Gemini
-        return GeminiService.generate(prompt, agent.systemPrompt)
+        return GeminiService.generate(prompt, systemPromptWithSkills)
+    }
+
+    private suspend fun parseAndExecuteAgenticActions(taskId: Int, agentName: String, output: String) {
+        for (line in output.split("\n")) {
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("git ") || trimmed.startsWith("$ git ") ->
+                    executeAgenticGitCommand(taskId, agentName, trimmed.removePrefix("$ ").trim())
+                trimmed.startsWith("MCP_CALL:") ->
+                    executeAgenticMcpCall(taskId, agentName, trimmed.removePrefix("MCP_CALL:").trim())
+            }
+        }
+    }
+
+    private suspend fun executeAgenticGitCommand(taskId: Int, agentName: String, command: String) {
+        if (command.contains("commit")) {
+            val message = try {
+                val match = Regex("""-m\s+["']([^"']+)["']""").find(command)
+                match?.groupValues?.get(1) ?: Regex("""-am\s+["']([^"']+)["']""").find(command)?.groupValues?.get(1) ?: "Agent commit"
+            } catch (e: Exception) {
+                "Agent commit"
+            }
+
+            val files = db.workspaceFileDao().getAllFiles().first()
+            val (result, status) = withContext(Dispatchers.IO) {
+                gitService.mirrorFiles(files)
+                gitService.commitAll(agentName, "${agentName.lowercase().replace(" ", "-")}@swarm.local", message)
+            }
+
+            if (result != null && status is GitOpResult.Success) {
+                db.gitCommitDao().insertCommit(
+                    GitCommit(commitHash = result.hash, author = result.author, message = result.message, timestamp = result.timestamp)
+                )
+                db.taskStepDao().insertStep(
+                    TaskStep(
+                        taskId = taskId,
+                        agentName = "Git Integration",
+                        agentRole = "System",
+                        actionType = "GIT_COMMIT",
+                        content = "Commit created: [${result.hash}] ${result.message} (by $agentName)"
+                    )
+                )
+            } else if (status is GitOpResult.Failure) {
+                db.taskStepDao().insertStep(
+                    TaskStep(
+                        taskId = taskId,
+                        agentName = "Git Integration",
+                        agentRole = "System",
+                        actionType = "GIT_COMMIT_FAILED",
+                        content = "Commit requested by $agentName failed: ${status.error}"
+                    )
+                )
+            }
+        } else if (command.startsWith("git branch ")) {
+            val branchName = command.removePrefix("git branch ").trim()
+            db.taskStepDao().insertStep(
+                TaskStep(
+                    taskId = taskId,
+                    agentName = "Git Integration",
+                    agentRole = "System",
+                    actionType = "GIT_BRANCH",
+                    content = "Branch creation ('$branchName' requested by $agentName) is not yet implemented -- no branch was created."
+                )
+            )
+        } else if (command.startsWith("git push")) {
+            val prefs = appContext.getSharedPreferences("ollama_swarm_prefs", android.content.Context.MODE_PRIVATE)
+            val remoteUrl = prefs.getString("git_remote_url", null)
+            val token = SecurePrefs.getGitToken(appContext)
+
+            if (remoteUrl.isNullOrBlank() || token.isNullOrBlank()) {
+                db.taskStepDao().insertStep(
+                    TaskStep(
+                        taskId = taskId,
+                        agentName = "Git Integration",
+                        agentRole = "System",
+                        actionType = "GIT_PUSH_FAILED",
+                        content = "Push requested by $agentName failed: no remote URL/token configured in Git Settings."
+                    )
+                )
+                return
+            }
+
+            val status = withContext(Dispatchers.IO) { gitService.push(remoteUrl, token) }
+            when (status) {
+                is GitOpResult.Success -> {
+                    val headHash = withContext(Dispatchers.IO) { gitService.localHeadHash() }
+                    prefs.edit().putString("git_last_pushed_hash", headHash).apply()
+                    db.taskStepDao().insertStep(
+                        TaskStep(
+                            taskId = taskId,
+                            agentName = "Git Integration",
+                            agentRole = "System",
+                            actionType = "GIT_PUSH",
+                            content = "Pushed local commits to remote (by $agentName)."
+                        )
+                    )
+                }
+                is GitOpResult.Failure -> {
+                    db.taskStepDao().insertStep(
+                        TaskStep(
+                            taskId = taskId,
+                            agentName = "Git Integration",
+                            agentRole = "System",
+                            actionType = "GIT_PUSH_FAILED",
+                            content = "Push requested by $agentName failed: ${status.error}"
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun executeAgenticMcpCall(taskId: Int, agentName: String, payload: String) {
+        val parts = payload.split("|", limit = 2)
+        val skillName = parts.getOrNull(0)?.trim().orEmpty()
+        val argsJson = parts.getOrNull(1)?.trim().orEmpty()
+
+        val skill = db.claudeSkillDao().getAllSkillsSync()
+            .firstOrNull { it.name.equals(skillName, ignoreCase = true) && it.isEnabled }
+        if (skill == null) {
+            db.taskStepDao().insertStep(
+                TaskStep(
+                    taskId = taskId,
+                    agentName = "MCP Tool",
+                    agentRole = "System",
+                    actionType = "MCP_CALL_FAILED",
+                    content = "$agentName tried to call unknown or disabled skill '$skillName'."
+                )
+            )
+            return
+        }
+
+        val server = db.mcpServerDao().getAllServersSync()
+            .firstOrNull { it.type == skill.requiredMcpServerType && it.status == "Connected" }
+        if (server == null) {
+            db.taskStepDao().insertStep(
+                TaskStep(
+                    taskId = taskId,
+                    agentName = "MCP Tool",
+                    agentRole = "System",
+                    actionType = "MCP_CALL_FAILED",
+                    content = "$agentName tried to call '$skillName' but no Connected MCP server of type '${skill.requiredMcpServerType}' is available."
+                )
+            )
+            return
+        }
+
+        val arguments = parseJsonArguments(argsJson)
+        val authToken = SecurePrefs.getMcpToken(appContext, server.id)
+
+        val outcome = mcpClient.initialize(server.sourceUrl, authToken).mapCatching { session ->
+            mcpClient.callTool(server.sourceUrl, session, authToken, skill.name, arguments).getOrThrow()
+        }
+
+        outcome.fold(
+            onSuccess = { toolResult ->
+                db.taskStepDao().insertStep(
+                    TaskStep(
+                        taskId = taskId,
+                        agentName = "MCP Tool",
+                        agentRole = "System",
+                        actionType = "MCP_TOOL_CALL",
+                        content = "$agentName called '$skillName' on ${server.name}. Result: $toolResult"
+                    )
+                )
+            },
+            onFailure = { error ->
+                db.taskStepDao().insertStep(
+                    TaskStep(
+                        taskId = taskId,
+                        agentName = "MCP Tool",
+                        agentRole = "System",
+                        actionType = "MCP_CALL_FAILED",
+                        content = "$agentName's call to '$skillName' on ${server.name} failed: ${error.message}"
+                    )
+                )
+            }
+        )
+    }
+
+    private fun parseJsonArguments(argsJson: String): Map<String, Any?> {
+        if (argsJson.isBlank()) return emptyMap()
+        return try {
+            val moshi = com.squareup.moshi.Moshi.Builder().build()
+            val type = com.squareup.moshi.Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+            @Suppress("UNCHECKED_CAST")
+            moshi.adapter<Map<String, Any?>>(type).fromJson(argsJson) ?: emptyMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private suspend fun runDynamicRoutingWorkflow(taskId: Int, agents: List<Agent>, userPrompt: String) {
+        val routerAgent = agents.find { it.role.lowercase().contains("executive") } 
+            ?: agents.find { it.name.lowercase().contains("orchestrator") } 
+            ?: agents.first()
+
+        updateTaskStatus(taskId, "Routing (${routerAgent.name})")
+
+        val routingStepId = db.taskStepDao().insertStep(
+            TaskStep(
+                taskId = taskId,
+                agentName = routerAgent.name,
+                agentRole = routerAgent.role,
+                actionType = "THINKING",
+                content = "Analyzing task requirements to design dynamic execution routing path..."
+            )
+        ).toInt()
+        delay(1500)
+
+        val routingPrompt = """
+            You are the Dynamic Routing Orchestrator. We have a swarm with the following available agents:
+            ${agents.joinToString("\n") { "- Agent ID: ${it.id}, Name: ${it.name}, Role: ${it.role}, Specialty: ${it.systemPrompt.take(100)}..." }}
+            
+            The user's task is: "$userPrompt"
+            
+            Analyze the task requirements. Decide which of the available agents should be involved in executing this task, and in what order. 
+            Respond with a valid, raw, unformatted JSON list of Agent IDs representing the routing path. Do NOT include markdown code blocks.
+            Format example:
+            [2, 4, 3]
+        """.trimIndent()
+
+        val routerResponse = generateOutputForAgent(routerAgent, routingPrompt)
+        val routedIds = Regex("""\d+""").findAll(routerResponse).map { it.value.toInt() }.toList()
+        
+        val routedAgents = routedIds.mapNotNull { id -> agents.find { it.id == id } }
+        val finalRoutedAgents = if (routedAgents.isEmpty()) agents.filter { it.id != routerAgent.id } else routedAgents
+
+        val routedNames = finalRoutedAgents.joinToString(" -> ") { it.name }
+        
+        db.taskStepDao().insertStep(
+            TaskStep(
+                id = routingStepId,
+                taskId = taskId,
+                agentName = routerAgent.name,
+                agentRole = routerAgent.role,
+                actionType = "ROUTING",
+                content = "Dynamic Swarm Routing path calculated: ${routerAgent.name} -> $routedNames -> Synthesis"
+            )
+        )
+        delay(1000)
+
+        var context = "Initial Task Request:\n\"$userPrompt\"\n\n"
+        for (index in finalRoutedAgents.indices) {
+            val agent = finalRoutedAgents[index]
+            val stepStartTime = System.currentTimeMillis()
+            AgentStateStore.setAgentActive(agent.id, true, "Running Routed Task")
+            
+            updateTaskStatus(taskId, "Routed: ${agent.name}")
+            
+            val stepId = db.taskStepDao().insertStep(
+                TaskStep(
+                    taskId = taskId,
+                    agentName = agent.name,
+                    agentRole = agent.role,
+                    actionType = "THINKING",
+                    content = "Executing routed task slice..."
+                )
+            ).toInt()
+            delay(1500)
+
+            val promptForAgent = "Previous context:\n$context\n\nPerform your tasks on: $userPrompt"
+            val agentOutput = generateOutputForAgent(agent, promptForAgent)
+            
+            parseAndExecuteAgenticActions(taskId, agent.name, agentOutput)
+
+            db.taskStepDao().insertStep(
+                TaskStep(
+                    id = stepId,
+                    taskId = taskId,
+                    agentName = agent.name,
+                    agentRole = agent.role,
+                    actionType = "OUTPUT",
+                    content = agentOutput
+                )
+            )
+
+            val stepDuration = System.currentTimeMillis() - stepStartTime
+            val approxTokens = (promptForAgent.length + agentOutput.length) / 2 + 100
+            AgentStateStore.recordExecutionMetrics(agent.id, stepDuration, approxTokens)
+            AgentStateStore.setAgentActive(agent.id, false, "Idle")
+            
+            context += "--- ${agent.name} (${agent.role}) Output ---\n$agentOutput\n\n"
+            delay(1000)
+        }
+
+        updateTaskStatus(taskId, "Synthesis (${routerAgent.name})")
+        val synthesisStartTime = System.currentTimeMillis()
+        AgentStateStore.setAgentActive(routerAgent.id, true, "Synthesizing")
+        
+        val synthesisStepId = db.taskStepDao().insertStep(
+            TaskStep(
+                taskId = taskId,
+                agentName = routerAgent.name,
+                agentRole = routerAgent.role,
+                actionType = "THINKING",
+                content = "Synthesizing dynamic routing results..."
+            )
+        ).toInt()
+        delay(1500)
+
+        val synthesisPrompt = "Synthesize all results into a final premium response to: $userPrompt\n\nFull workspace history:\n$context"
+        val finalResult = generateOutputForAgent(routerAgent, synthesisPrompt)
+        
+        db.taskStepDao().insertStep(
+            TaskStep(
+                id = synthesisStepId,
+                taskId = taskId,
+                agentName = routerAgent.name,
+                agentRole = routerAgent.role,
+                actionType = "FINAL_RESPONSE",
+                content = finalResult
+            )
+        )
+
+        val synthesisDuration = System.currentTimeMillis() - synthesisStartTime
+        val synthesisTokens = (synthesisPrompt.length + finalResult.length) / 2 + 100
+        AgentStateStore.recordExecutionMetrics(routerAgent.id, synthesisDuration, synthesisTokens)
+        AgentStateStore.setAgentActive(routerAgent.id, false, "Idle")
     }
 
     private suspend fun updateTaskStatus(taskId: Int, status: String) {

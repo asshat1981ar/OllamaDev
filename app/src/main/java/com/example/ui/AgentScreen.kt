@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +29,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.Agent
 import com.example.viewmodel.SwarmViewModel
+
+private val OLLAMA_CLOUD_MODEL_PRESETS = listOf(
+    "gpt-oss:120b", "qwen3-coder:480b", "glm-5.2", "kimi-k2.6", "deepseek-v4-pro", "minimax-m3", "gemma4:26b"
+)
 
 @Composable
 fun AgentScreen(
@@ -196,8 +201,7 @@ fun AgentScreen(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                val presets = listOf("llama3:8b", "mistral:7b", "phi3", "gemma2:9b", "qwen2:7b", "codegemma:7b", "codellama:7b")
-                                presets.forEach { model ->
+                                OLLAMA_CLOUD_MODEL_PRESETS.forEach { model ->
                                     val isSelected = modelInput == model
                                     Surface(
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
@@ -316,7 +320,7 @@ fun AgentCard(
                         val icon = when (agent.role.lowercase()) {
                             "researcher" -> Icons.Rounded.Search
                             "programmer" -> Icons.Rounded.Terminal
-                            "critic" -> Icons.Rounded.Grading
+                            "critic" -> Icons.AutoMirrored.Rounded.Grading
                             "executive" -> Icons.Rounded.CheckCircle
                             else -> Icons.Rounded.SmartToy
                         }

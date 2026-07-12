@@ -30,6 +30,11 @@ class MainActivity : ComponentActivity() {
         SwarmViewModelFactory(application)
     }
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.syncWorkspace(isAutomatic = true)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

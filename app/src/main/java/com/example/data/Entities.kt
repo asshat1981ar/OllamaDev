@@ -9,7 +9,9 @@ data class OllamaNode(
     val name: String,
     val url: String,
     val status: String = "Offline", // Online, Offline, Connecting
-    val availableModels: String = "llama3, mistral, phi3" // Comma-separated list
+    val availableModels: String = "llama3, mistral, phi3", // Comma-separated list
+    val latencyMs: Int = -1,
+    val apiKey: String? = null // Bearer token for authenticated endpoints (e.g. Ollama Cloud)
 )
 
 @Entity(tableName = "agents")
@@ -61,7 +63,10 @@ data class WorkspaceFile(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val filePath: String,
     val content: String,
-    val lastModified: Long = System.currentTimeMillis()
+    val lastModified: Long = System.currentTimeMillis(),
+    val sourceUri: String? = null,
+    val isConflict: Boolean = false,
+    val conflictContent: String? = null
 )
 
 @Entity(tableName = "chat_messages")

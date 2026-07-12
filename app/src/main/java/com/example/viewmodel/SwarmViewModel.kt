@@ -1,6 +1,11 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.net.Uri
+import android.util.Log
+import android.widget.Toast
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -13,6 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+
+private const val TAG = "SwarmViewModel"
+private const val MAX_IMPORT_FILE_BYTES = 300 * 1024
 
 @JsonClass(generateAdapter = true)
 data class VoiceAction(
@@ -29,8 +38,19 @@ data class VoiceAction(
 
 class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
-    private val swarmEngine = SwarmEngine(db)
+    private val mcpClient = McpClient()
+    // Deferred: references gitService/gitWorkDir declared further down, which are themselves
+    // `by lazy` -- deferring this avoids reading them before their own initializers have run.
+    private val swarmEngine by lazy { SwarmEngine(db, gitService, mcpClient, getApplication()) }
     private val moshi = Moshi.Builder().build()
+
+    private val prefs = application.getSharedPreferences("ollama_swarm_prefs", Context.MODE_PRIVATE)
+
+    private val _rootFolderUri = MutableStateFlow<String?>(null)
+    val rootFolderUri: StateFlow<String?> = _rootFolderUri.asStateFlow()
+
+    private val _rootFolderName = MutableStateFlow<String?>(null)
+    val rootFolderName: StateFlow<String?> = _rootFolderName.asStateFlow()
 
     // Database flows
     val allNodes = db.ollamaNodeDao().getAllNodes()
@@ -67,6 +87,19 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     // Centralized Agent State Store Flow
     val agentStates: StateFlow<Map<Int, AgentMetrics>> = AgentStateStore.agentStates
 
+    val totalTokensUsed: StateFlow<Int> = AgentStateStore.agentStates.map { map ->
+        map.values.sumOf { it.totalTokensUsed }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    val totalCostSavingsUsd: StateFlow<Double> = AgentStateStore.agentStates.map { map ->
+        val totalTokens = map.values.sumOf { it.totalTokensUsed }
+        (totalTokens.toDouble() / 1000.0) * 0.015
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    val totalSandboxRuns: StateFlow<Int> = AgentStateStore.agentStates.map { map ->
+        map.values.sumOf { it.tasksExecuted }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
     // Voice UI states
     private val _isVoiceListening = MutableStateFlow(false)
     val isVoiceListening: StateFlow<Boolean> = _isVoiceListening.asStateFlow()
@@ -100,6 +133,19 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        // Load root folder URI from preferences and trigger sync
+        val savedUri = prefs.getString("root_folder_uri", null)
+        val savedName = prefs.getString("root_folder_name", null)
+        if (savedUri != null) {
+            _rootFolderUri.value = savedUri
+            _rootFolderName.value = savedName
+            syncWorkspace(isAutomatic = true)
+        }
+
+        // Probe real node status on startup so agent dispatch can immediately route to a
+        // genuinely reachable node instead of relying on stale/seeded status values.
+        refreshNodes()
     }
 
     fun clearAgentMetrics() {
@@ -107,9 +153,16 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Node Operations
-    fun addNode(name: String, url: String, availableModels: String = "llama3") {
+    fun addNode(name: String, url: String, availableModels: String = "llama3", apiKey: String? = null) {
         viewModelScope.launch {
-            db.ollamaNodeDao().insertNode(OllamaNode(name = name, url = url, availableModels = availableModels))
+            db.ollamaNodeDao().insertNode(
+                OllamaNode(
+                    name = name,
+                    url = url,
+                    availableModels = availableModels,
+                    apiKey = apiKey?.takeIf { it.isNotBlank() }
+                )
+            )
         }
     }
 
@@ -127,32 +180,104 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshNodes() {
         viewModelScope.launch {
-            // Simulate decentralized ping across custom node URLs
-            val nodes = db.ollamaNodeDao().getAllNodes().stateIn(viewModelScope).value
+            val nodes = db.ollamaNodeDao().getAllNodesSync()
             nodes.forEach { node ->
                 db.ollamaNodeDao().updateNode(node.copy(status = "Connecting"))
             }
-            delay(1200)
+            
             nodes.forEach { node ->
-                val newStatus = if (node.name.contains("Local")) "Offline" else "Online"
-                db.ollamaNodeDao().updateNode(node.copy(status = newStatus))
+                val startTime = System.currentTimeMillis()
+                val (isOnline, fetchedModels) = OllamaService.pingAndFetchModels(node.url, resolveApiKeyForNode(node))
+                val duration = (System.currentTimeMillis() - startTime).toInt()
+                
+                val status = if (isOnline) "Online" else "Offline"
+                val latency = if (isOnline) duration else -1
+                val models = if (isOnline && fetchedModels.isNotEmpty()) {
+                    fetchedModels.joinToString(", ")
+                } else {
+                    node.availableModels
+                }
+                
+                db.ollamaNodeDao().updateNode(
+                    node.copy(
+                        status = status,
+                        latencyMs = latency,
+                        availableModels = models
+                    )
+                )
             }
         }
     }
 
-    // MCP Server Operations
-    fun addMcpServer(name: String, type: String, sourceUrl: String, configuredParams: String = "{}") {
+    fun pingNode(node: OllamaNode) {
         viewModelScope.launch {
-            db.mcpServerDao().insertServer(
+            db.ollamaNodeDao().updateNode(node.copy(status = "Connecting"))
+            val startTime = System.currentTimeMillis()
+            val (isOnline, fetchedModels) = OllamaService.pingAndFetchModels(node.url)
+            val duration = (System.currentTimeMillis() - startTime).toInt()
+            
+            val status = if (isOnline) "Online" else "Offline"
+            val latency = if (isOnline) duration else -1
+            val models = if (isOnline && fetchedModels.isNotEmpty()) {
+                fetchedModels.joinToString(", ")
+            } else {
+                node.availableModels
+            }
+            
+            db.ollamaNodeDao().updateNode(
+                node.copy(
+                    status = status,
+                    latencyMs = latency,
+                    availableModels = models
+                )
+            )
+        }
+    }
+
+    // MCP Server Operations
+    private val _mcpError = MutableStateFlow<String?>(null)
+    val mcpError: StateFlow<String?> = _mcpError.asStateFlow()
+
+    private suspend fun connectMcpServer(serverId: Int, sourceUrl: String, type: String, authToken: String?) {
+        val initResult = withContext(Dispatchers.IO) { mcpClient.initialize(sourceUrl, authToken) }
+        val session = initResult.getOrNull()
+        if (session == null) {
+            db.mcpServerDao().getServerById(serverId)?.let {
+                db.mcpServerDao().updateServer(it.copy(status = "Error"))
+            }
+            _mcpError.value = "Failed to connect to $sourceUrl: ${initResult.exceptionOrNull()?.message}"
+            return
+        }
+
+        val toolsResult = withContext(Dispatchers.IO) { mcpClient.listTools(sourceUrl, session, authToken) }
+        val server = db.mcpServerDao().getServerById(serverId) ?: return
+        if (toolsResult.isSuccess) {
+            db.mcpServerDao().updateServer(server.copy(status = "Connected", toolsCount = toolsResult.getOrNull()?.size ?: 0))
+            db.claudeSkillDao().updateRecommendationByServerType(type, true)
+            db.claudeSkillDao().setSkillEnabledByServerType(type, true)
+        } else {
+            db.mcpServerDao().updateServer(server.copy(status = "Error"))
+            _mcpError.value = "Connected but failed to list tools: ${toolsResult.exceptionOrNull()?.message}"
+        }
+    }
+
+    fun addMcpServer(name: String, type: String, sourceUrl: String, configuredParams: String = "{}", authToken: String = "") {
+        viewModelScope.launch {
+            _mcpError.value = null
+            val id = db.mcpServerDao().insertServer(
                 McpServer(
                     name = name,
                     type = type,
                     sourceUrl = sourceUrl,
-                    status = "Connected",
-                    toolsCount = (3..12).random(),
+                    status = "Connecting",
+                    toolsCount = 0,
                     configuredParams = configuredParams
                 )
-            )
+            ).toInt()
+            if (authToken.isNotBlank()) {
+                SecurePrefs.setMcpToken(getApplication(), id, authToken)
+            }
+            connectMcpServer(id, sourceUrl, type, authToken.ifBlank { null })
         }
     }
 
@@ -165,13 +290,25 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteMcpServer(server: McpServer) {
         viewModelScope.launch {
             db.mcpServerDao().deleteServer(server)
+            SecurePrefs.clearMcpToken(getApplication(), server.id)
+            // Disable skills related to deleted server
+            db.claudeSkillDao().updateRecommendationByServerType(server.type, false)
+            db.claudeSkillDao().setSkillEnabledByServerType(server.type, false)
         }
     }
 
     fun toggleMcpServerStatus(server: McpServer) {
         viewModelScope.launch {
-            val newStatus = if (server.status == "Connected") "Disconnected" else "Connected"
-            db.mcpServerDao().updateServer(server.copy(status = newStatus))
+            if (server.status == "Connected") {
+                db.mcpServerDao().updateServer(server.copy(status = "Disconnected"))
+                db.claudeSkillDao().updateRecommendationByServerType(server.type, false)
+                db.claudeSkillDao().setSkillEnabledByServerType(server.type, false)
+            } else {
+                _mcpError.value = null
+                db.mcpServerDao().updateServer(server.copy(status = "Connecting"))
+                val authToken = SecurePrefs.getMcpToken(getApplication(), server.id)
+                connectMcpServer(server.id, server.sourceUrl, server.type, authToken)
+            }
         }
     }
 
@@ -390,40 +527,169 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     private val _gitCodename = MutableStateFlow("nebula-omega")
     val gitCodename: StateFlow<String> = _gitCodename.asStateFlow()
 
+    private val _gitRemoteUrl = MutableStateFlow(prefs.getString("git_remote_url", "") ?: "")
+    val gitRemoteUrl: StateFlow<String> = _gitRemoteUrl.asStateFlow()
+
     private val _isGitSynced = MutableStateFlow(true)
     val isGitSynced: StateFlow<Boolean> = _isGitSynced.asStateFlow()
 
     private val _isGitSyncing = MutableStateFlow(false)
     val isGitSyncing: StateFlow<Boolean> = _isGitSyncing.asStateFlow()
 
+    private val _gitError = MutableStateFlow<String?>(null)
+    val gitError: StateFlow<String?> = _gitError.asStateFlow()
+
+    private val gitWorkDir by lazy {
+        File(getApplication<Application>().filesDir, "git_workspace").apply { mkdirs() }
+    }
+    private val gitService by lazy { GitService(gitWorkDir) }
+
+    private fun computeGitSyncState() {
+        val lastPushedHash = prefs.getString("git_last_pushed_hash", null)
+        _isGitSynced.value = gitService.isClean() && gitService.localHeadHash() == lastPushedHash
+    }
+
     fun selectFile(file: WorkspaceFile?) {
         _selectedFile.value = file
+    }
+
+    private fun findOrCreateFileInTree(root: DocumentFile, relativePath: String): DocumentFile? {
+        val components = relativePath.split('/')
+        var currentDir = root
+        for (i in 0 until components.size - 1) {
+            val dirName = components[i]
+            if (dirName.isEmpty() || dirName == ".") continue
+            var nextDir = currentDir.findFile(dirName)
+            if (nextDir == null || !nextDir.isDirectory) {
+                nextDir = currentDir.createDirectory(dirName) ?: return null
+            }
+            currentDir = nextDir
+        }
+        val fileName = components.last()
+        var fileDoc = currentDir.findFile(fileName)
+        if (fileDoc == null) {
+            val ext = fileName.substringAfterLast('.', "")
+            val mimeType = when (ext) {
+                "json" -> "application/json"
+                "xml" -> "application/xml"
+                "html" -> "text/html"
+                "css" -> "text/css"
+                else -> "text/plain"
+            }
+            fileDoc = currentDir.createFile(mimeType, fileName)
+        }
+        return fileDoc
     }
 
     fun createFile(filePath: String, content: String) {
         viewModelScope.launch {
             val cleanPath = filePath.trim().replace(" ", "_")
-            val newFile = WorkspaceFile(filePath = cleanPath, content = content, lastModified = System.currentTimeMillis())
-            db.workspaceFileDao().insertFile(newFile)
+            var sourceUriStr: String? = null
+            val finalContent = content
+            val uriStr = _rootFolderUri.value
+            if (uriStr != null) {
+                val app = getApplication<Application>()
+                val treeUri = Uri.parse(uriStr)
+                val root = withContext(Dispatchers.IO) { DocumentFile.fromTreeUri(app, treeUri) }
+                if (root != null && root.isDirectory) {
+                    val realDoc = withContext(Dispatchers.IO) {
+                        findOrCreateFileInTree(root, cleanPath)
+                    }
+                    if (realDoc != null) {
+                        sourceUriStr = realDoc.uri.toString()
+                        withContext(Dispatchers.IO) {
+                            try {
+                                app.contentResolver.openOutputStream(realDoc.uri, "wt")
+                                    ?.use { it.write(finalContent.toByteArray()) }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to write initial content for new file: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
+
+            val newFile = WorkspaceFile(
+                filePath = cleanPath,
+                content = finalContent,
+                lastModified = System.currentTimeMillis(),
+                sourceUri = sourceUriStr
+            )
+            val newId = db.workspaceFileDao().insertFile(newFile)
+            val insertedFile = newFile.copy(id = newId.toInt())
+            _selectedFile.value = insertedFile
             _isGitSynced.value = false
         }
     }
 
+    suspend fun saveFileContentSuspended(id: Int, content: String): WorkspaceFile? {
+        val existing = db.workspaceFileDao().getFileById(id) ?: return null
+        val updated = existing.copy(content = content, lastModified = System.currentTimeMillis())
+        existing.sourceUri?.let { uriString ->
+            withContext(Dispatchers.IO) {
+                try {
+                    getApplication<Application>().contentResolver
+                        .openOutputStream(Uri.parse(uriString), "wt")
+                        ?.use { it.write(content.toByteArray()) }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to write back to real file $uriString: ${e.message}")
+                }
+            }
+        }
+        db.workspaceFileDao().insertFile(updated)
+        _selectedFile.value = updated
+        _isGitSynced.value = false
+        return updated
+    }
+
     fun saveFile(id: Int, content: String) {
         viewModelScope.launch {
-            val existing = db.workspaceFileDao().getFileById(id)
-            if (existing != null) {
-                val updated = existing.copy(content = content, lastModified = System.currentTimeMillis())
-                db.workspaceFileDao().insertFile(updated)
-                _selectedFile.value = updated
-                _isGitSynced.value = false
+            saveFileContentSuspended(id, content)
+        }
+    }
+
+    fun resolveConflict(id: Int, resolvedContent: String, keepLocal: Boolean) {
+        viewModelScope.launch {
+            val existing = db.workspaceFileDao().getFileById(id) ?: return@launch
+            val resolved = existing.copy(
+                content = resolvedContent,
+                isConflict = false,
+                conflictContent = null,
+                lastModified = System.currentTimeMillis()
+            )
+            if (keepLocal) {
+                resolved.sourceUri?.let { uriString ->
+                    withContext(Dispatchers.IO) {
+                        try {
+                            getApplication<Application>().contentResolver
+                                .openOutputStream(Uri.parse(uriString), "wt")
+                                ?.use { it.write(resolvedContent.toByteArray()) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to write resolved content to $uriString: ${e.message}")
+                        }
+                    }
+                }
             }
+            db.workspaceFileDao().insertFile(resolved)
+            _selectedFile.value = resolved
         }
     }
 
     fun deleteFile(file: WorkspaceFile) {
         viewModelScope.launch {
             db.workspaceFileDao().deleteFile(file)
+            file.sourceUri?.let { uriStr ->
+                withContext(Dispatchers.IO) {
+                    try {
+                        val fileDoc = DocumentFile.fromSingleUri(getApplication(), Uri.parse(uriStr))
+                        if (fileDoc != null && fileDoc.exists()) {
+                            fileDoc.delete()
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to delete real file: ${e.message}")
+                    }
+                }
+            }
             if (_selectedFile.value?.id == file.id) {
                 _selectedFile.value = null
             }
@@ -437,31 +703,366 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateGitSettings(repoName: String, codename: String) {
+    private val _isImportingFolder = MutableStateFlow(false)
+    val isImportingFolder: StateFlow<Boolean> = _isImportingFolder.asStateFlow()
+
+    private val _folderImportStatus = MutableStateFlow("")
+    val folderImportStatus: StateFlow<String> = _folderImportStatus.asStateFlow()
+
+    fun importFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            _isImportingFolder.value = true
+            _folderImportStatus.value = "Scanning..."
+            try {
+                val app = getApplication<Application>()
+                app.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+
+                val root = withContext(Dispatchers.IO) { DocumentFile.fromTreeUri(app, treeUri) }
+                if (root == null || !root.isDirectory) {
+                    _folderImportStatus.value = "Could not open selected folder."
+                    return@launch
+                }
+
+                // Persist folder Uri and Name
+                val rootName = root.name ?: "Workspace Folder"
+                prefs.edit()
+                    .putString("root_folder_uri", treeUri.toString())
+                    .putString("root_folder_name", rootName)
+                    .apply()
+                _rootFolderUri.value = treeUri.toString()
+                _rootFolderName.value = rootName
+
+                // Clear existing files before importing a new project
+                db.workspaceFileDao().deleteAllFiles()
+
+                var imported = 0
+                val maxFiles = 1500
+                val hitCap = withContext(Dispatchers.IO) {
+                    walkAndImport(root, maxFiles = maxFiles) { relativePath, doc ->
+                        val text = try {
+                            app.contentResolver.openInputStream(doc.uri)
+                                ?.bufferedReader()?.use { it.readText() }
+                        } catch (e: Exception) {
+                            null
+                        } ?: return@walkAndImport
+
+                        val existing = db.workspaceFileDao().getFileByPath(relativePath)
+                        val file = WorkspaceFile(
+                            id = existing?.id ?: 0,
+                            filePath = relativePath,
+                            content = text,
+                            lastModified = doc.lastModified(),
+                            sourceUri = doc.uri.toString()
+                        )
+                        db.workspaceFileDao().insertFile(file)
+                        imported++
+                        _folderImportStatus.value = "Imported $imported files..."
+                    }
+                }
+
+                _folderImportStatus.value = if (hitCap) {
+                    "Imported $imported files from ${root.name} (stopped at the $maxFiles-file limit -- some files were not imported)."
+                } else {
+                    "Imported $imported files from ${root.name}."
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(app, "Project imported: $rootName", Toast.LENGTH_SHORT).show()
+                }
+                if (imported > 0) {
+                    selectFile(db.workspaceFileDao().getAllFiles().first().firstOrNull())
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Folder import failed: ${e.message}", e)
+                _folderImportStatus.value = "Import failed: ${e.message}"
+            } finally {
+                _isImportingFolder.value = false
+            }
+        }
+    }
+
+    fun syncWorkspace(isAutomatic: Boolean = false) {
+        val uriStr = _rootFolderUri.value ?: return
+        viewModelScope.launch {
+            if (_isImportingFolder.value) return@launch // Prevent concurrent syncs/scans
+            _isImportingFolder.value = true
+            _folderImportStatus.value = "Synchronizing..."
+            try {
+                val app = getApplication<Application>()
+                val treeUri = Uri.parse(uriStr)
+
+                // Verify permissions
+                val hasPermission = app.contentResolver.persistedUriPermissions.any {
+                    it.uri == treeUri && it.isReadPermission && it.isWritePermission
+                }
+                if (!hasPermission) {
+                    _folderImportStatus.value = "Permission lost for workspace folder."
+                    _isImportingFolder.value = false
+                    return@launch
+                }
+
+                val root = withContext(Dispatchers.IO) { DocumentFile.fromTreeUri(app, treeUri) }
+                if (root == null || !root.isDirectory) {
+                    _folderImportStatus.value = "Could not open workspace folder."
+                    _isImportingFolder.value = false
+                    return@launch
+                }
+
+                val diskFiles = mutableMapOf<String, DocumentFile>()
+                val maxFiles = 1500
+                var hitCap = false
+
+                withContext(Dispatchers.IO) {
+                    suspend fun walk(node: DocumentFile, base: String) {
+                        if (diskFiles.size >= maxFiles) {
+                            hitCap = true
+                            return
+                        }
+                        for (child in node.listFiles()) {
+                            if (diskFiles.size >= maxFiles) {
+                                hitCap = true
+                                return
+                            }
+                            val name = child.name ?: continue
+                            val path = if (base.isEmpty()) name else "$base/$name"
+                            if (child.isDirectory) {
+                                if (name !in skippedDirNames && !name.startsWith(".")) {
+                                    walk(child, path)
+                                }
+                            } else {
+                                val ext = name.substringAfterLast('.', "")
+                                if (ext in importableExtensions && child.length() in 1..MAX_IMPORT_FILE_BYTES.toLong()) {
+                                    diskFiles[path] = child
+                                }
+                            }
+                        }
+                    }
+                    walk(root, "")
+                }
+
+                val dbFiles = db.workspaceFileDao().getAllFiles().first().associateBy { it.filePath }
+                var added = 0
+                var updated = 0
+                var deleted = 0
+
+                val filesToInsert = mutableListOf<WorkspaceFile>()
+                val filesToDelete = mutableListOf<WorkspaceFile>()
+
+                // 1. Process files from disk (Add or Update)
+                for ((relativePath, doc) in diskFiles) {
+                    val existing = dbFiles[relativePath]
+                    if (existing == null) {
+                        val text = withContext(Dispatchers.IO) {
+                            try {
+                                app.contentResolver.openInputStream(doc.uri)
+                                    ?.bufferedReader()?.use { it.readText() }
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } ?: continue
+                        val file = WorkspaceFile(
+                            filePath = relativePath,
+                            content = text,
+                            lastModified = doc.lastModified(),
+                            sourceUri = doc.uri.toString()
+                        )
+                        filesToInsert.add(file)
+                        added++
+                    } else {
+                        if (doc.lastModified() > existing.lastModified) {
+                            val text = withContext(Dispatchers.IO) {
+                                try {
+                                    app.contentResolver.openInputStream(doc.uri)
+                                        ?.bufferedReader()?.use { it.readText() }
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                            if (text != null && text != existing.content) {
+                                // If the disk content has changed, flag it as a conflict
+                                val updatedFile = existing.copy(
+                                    isConflict = true,
+                                    conflictContent = text, // store disk content
+                                    lastModified = doc.lastModified()
+                                )
+                                filesToInsert.add(updatedFile)
+                                updated++
+                            }
+                        }
+                    }
+                }
+
+                // 2. Process files in DB that are missing on disk (Delete)
+                for ((relativePath, dbFile) in dbFiles) {
+                    if (dbFile.sourceUri != null && !diskFiles.containsKey(relativePath)) {
+                        filesToDelete.add(dbFile)
+                        if (_selectedFile.value?.id == dbFile.id) {
+                            _selectedFile.value = null
+                        }
+                        deleted++
+                    }
+                }
+
+                // 3. Commit transaction
+                if (filesToInsert.isNotEmpty() || filesToDelete.isNotEmpty()) {
+                    db.workspaceFileDao().syncFilesTransaction(filesToInsert, filesToDelete)
+                }
+
+                val statusMsg = when {
+                    hitCap -> "Synced (stopped at $maxFiles-file limit). Added $added, updated $updated, deleted $deleted."
+                    added > 0 || updated > 0 || deleted > 0 -> "Sync complete. Added $added, updated $updated, deleted $deleted."
+                    else -> "Sync complete. No changes."
+                }
+                _folderImportStatus.value = statusMsg
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(app, statusMsg, Toast.LENGTH_SHORT).show()
+                }
+
+                val remainingFiles = db.workspaceFileDao().getAllFiles().first()
+                if (_selectedFile.value == null && remainingFiles.isNotEmpty()) {
+                    selectFile(remainingFiles.firstOrNull())
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Workspace sync failed", e)
+                _folderImportStatus.value = "Sync failed: ${e.message}"
+            } finally {
+                _isImportingFolder.value = false
+            }
+        }
+    }
+
+    fun disconnectFolder() {
+        viewModelScope.launch {
+            _isImportingFolder.value = true
+            _folderImportStatus.value = "Disconnecting..."
+            try {
+                prefs.edit().remove("root_folder_uri").remove("root_folder_name").apply()
+                _rootFolderUri.value = null
+                _rootFolderName.value = null
+
+                val allFiles = db.workspaceFileDao().getAllFiles().first()
+                allFiles.forEach { file ->
+                    if (file.sourceUri != null) {
+                        db.workspaceFileDao().deleteFile(file)
+                    }
+                }
+
+                if (_selectedFile.value?.sourceUri != null) {
+                    _selectedFile.value = null
+                }
+
+                _folderImportStatus.value = "Disconnected from folder."
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "Workspace disconnected", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Disconnect folder failed", e)
+                _folderImportStatus.value = "Disconnect failed: ${e.message}"
+            } finally {
+                _isImportingFolder.value = false
+            }
+        }
+    }
+
+    private val skippedDirNames = setOf(
+        ".git", "build", ".gradle", "node_modules", ".idea", ".transforms",
+        ".worktrees", "dist", "out", ".cache", ".kotlin"
+    )
+    private val importableExtensions = setOf(
+        "kt", "kts", "java", "xml", "gradle", "md", "json", "py", "js", "ts", "jsx", "tsx",
+        "txt", "yml", "yaml", "toml", "properties", "sh", "css", "html", "sql", "proto"
+    )
+
+    private suspend fun walkAndImport(
+        dir: DocumentFile,
+        maxFiles: Int,
+        onFile: suspend (relativePath: String, doc: DocumentFile) -> Unit
+    ): Boolean {
+        var count = 0
+        suspend fun walk(node: DocumentFile, base: String) {
+            if (count >= maxFiles) return
+            for (child in node.listFiles()) {
+                if (count >= maxFiles) return
+                val name = child.name ?: continue
+                val path = if (base.isEmpty()) name else "$base/$name"
+                if (child.isDirectory) {
+                    if (name !in skippedDirNames && !name.startsWith(".")) {
+                        walk(child, path)
+                    }
+                } else {
+                    val ext = name.substringAfterLast('.', "")
+                    if (ext in importableExtensions && child.length() in 1..MAX_IMPORT_FILE_BYTES.toLong()) {
+                        onFile(path, child)
+                        count++
+                    }
+                }
+            }
+        }
+        walk(dir, "")
+        return count >= maxFiles
+    }
+
+    fun updateGitSettings(repoName: String, codename: String, remoteUrl: String, token: String) {
         _gitRepoName.value = repoName
         _gitCodename.value = codename
+        _gitRemoteUrl.value = remoteUrl
+        prefs.edit().putString("git_remote_url", remoteUrl).apply()
+        if (token.isNotBlank()) {
+            SecurePrefs.setGitToken(getApplication(), token)
+        }
     }
 
     fun commitChanges(message: String) {
         viewModelScope.launch {
-            val hash = (0..7).map { "0123456789abcdef".random() }.joinToString("")
-            val commit = GitCommit(
-                commitHash = hash,
-                author = "Lead Swarm Orchestrator",
-                message = message,
-                timestamp = System.currentTimeMillis()
-            )
-            db.gitCommitDao().insertCommit(commit)
-            _isGitSynced.value = false
+            _gitError.value = null
+            val files = db.workspaceFileDao().getAllFiles().first()
+            val (result, status) = withContext(Dispatchers.IO) {
+                gitService.mirrorFiles(files)
+                gitService.commitAll("Lead Swarm Orchestrator", "orchestrator@ollamadev.local", message)
+            }
+            if (result != null && status is GitOpResult.Success) {
+                db.gitCommitDao().insertCommit(
+                    GitCommit(
+                        commitHash = result.hash,
+                        author = result.author,
+                        message = result.message,
+                        timestamp = result.timestamp
+                    )
+                )
+                withContext(Dispatchers.IO) { computeGitSyncState() }
+            } else if (status is GitOpResult.Failure) {
+                _gitError.value = status.error
+            }
         }
     }
 
     fun pushToGit() {
+        val remoteUrl = _gitRemoteUrl.value
+        val token = SecurePrefs.getGitToken(getApplication())
+        if (remoteUrl.isBlank() || token.isNullOrBlank()) {
+            _gitError.value = "Configure a remote URL and personal access token in Git Settings before pushing."
+            return
+        }
         viewModelScope.launch {
+            _gitError.value = null
             _isGitSyncing.value = true
-            delay(2000)
-            _isGitSynced.value = true
-            _isGitSyncing.value = false
+            try {
+                val status = withContext(Dispatchers.IO) { gitService.push(remoteUrl, token) }
+                when (status) {
+                    is GitOpResult.Success -> {
+                        val headHash = withContext(Dispatchers.IO) { gitService.localHeadHash() }
+                        prefs.edit().putString("git_last_pushed_hash", headHash).apply()
+                        withContext(Dispatchers.IO) { computeGitSyncState() }
+                    }
+                    is GitOpResult.Failure -> _gitError.value = status.error
+                }
+            } finally {
+                _isGitSyncing.value = false
+            }
         }
     }
 
@@ -580,6 +1181,26 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     private val _sandboxTimeMs = MutableStateFlow(0L)
     val sandboxTimeMs: StateFlow<Long> = _sandboxTimeMs.asStateFlow()
 
+    private val _isSelfHealingEnabled = MutableStateFlow(true)
+    val isSelfHealingEnabled: StateFlow<Boolean> = _isSelfHealingEnabled.asStateFlow()
+
+    fun setSelfHealingEnabled(enabled: Boolean) {
+        _isSelfHealingEnabled.value = enabled
+    }
+
+    private val _pendingSelfHealingPatch = MutableStateFlow<Pair<WorkspaceFile, String>?>(null)
+    val pendingSelfHealingPatch: StateFlow<Pair<WorkspaceFile, String>?> = _pendingSelfHealingPatch.asStateFlow()
+
+    private var selfHealingDeferred: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+
+    fun acceptSelfHealingPatch() {
+        selfHealingDeferred?.complete(true)
+    }
+
+    fun declineSelfHealingPatch() {
+        selfHealingDeferred?.complete(false)
+    }
+
     fun runSandbox(file: WorkspaceFile) {
         viewModelScope.launch {
             _isSandboxRunning.value = true
@@ -597,53 +1218,134 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             }
             _sandboxLanguage.value = language
 
-            delay(600)
-            _sandboxConsoleOutput.value += "[INFO] Running lexical check & AST syntax parsing...\n"
-            delay(500)
+            var currentFile = file
+            var attempt = 1
+            val maxAttempts = 3
+            var hasErrors = true
 
-            val prompt = """
-                You are a highly precise sandboxed code compiler and runtime terminal.
-                Execute the following file contents as if it was running on a native OS with full sandbox libraries.
-                If there are logical bugs or syntax errors, throw the exact compile or runtime trace back.
-                
-                File path: ${file.filePath}
-                Language environment: $language
-                
-                File Contents:
-                ```
-                ${file.content}
-                ```
-                
-                Generate the exact console/terminal log output of running this script. 
-                Include any standard output streams, return values, errors, or logs.
-                Make the terminal output look extremely detailed, technical, clean, and real.
-                No markdown wrapper around your answer, just the raw terminal output of compilation and execution.
-            """.trimIndent()
+            while (attempt <= maxAttempts && hasErrors) {
+                if (attempt > 1) {
+                    _sandboxConsoleOutput.value += "\n[SELF-HEAL] Re-compiling code (Attempt $attempt of $maxAttempts)...\n"
+                } else {
+                    delay(600)
+                    _sandboxConsoleOutput.value += "[INFO] Running lexical check & AST syntax parsing...\n"
+                    delay(500)
+                }
 
-            try {
-                _sandboxConsoleOutput.value += "[COMPILER] Linking libraries and starting sandbox runner...\n"
-                val systemInstruction = "You are a sandboxed terminal interpreter. Output the exact execution logs of the code provided."
-                val output = GeminiService.generate(prompt, systemInstruction)
+                val prompt = """
+                    You are a highly precise sandboxed code compiler and runtime terminal.
+                    Execute the following file contents as if it was running on a native OS with full sandbox libraries.
+                    If there are logical bugs or syntax errors, throw the exact compile or runtime trace back.
+                    
+                    File path: ${currentFile.filePath}
+                    Language environment: $language
+                    
+                    File Contents:
+                    ```
+                    ${currentFile.content}
+                    ```
+                    
+                    Generate the exact console/terminal log output of running this script. 
+                    Include any standard output streams, return values, errors, or logs.
+                    Make the terminal output look extremely detailed, technical, clean, and real.
+                    No markdown wrapper around your answer, just the raw terminal output of compilation and execution.
+                """.trimIndent()
+
+                try {
+                    _sandboxConsoleOutput.value += "[COMPILER] Linking libraries and starting sandbox runner...\n"
+                    val systemInstruction = "You are a sandboxed terminal interpreter. Output the exact execution logs of the code provided."
+                    val output = GeminiService.generate(prompt, systemInstruction)
+                    
+                    delay(800)
+                    _sandboxConsoleOutput.value += "\n--- VIRTUAL RUNTIME OUTPUT ---\n"
+                    _sandboxConsoleOutput.value += output
+                    _sandboxConsoleOutput.value += "\n--------------------------------\n"
+                    
+                    hasErrors = output.lowercase().contains("error") || output.lowercase().contains("exception") || output.lowercase().contains("failed")
+                    _sandboxExitCode.value = if (hasErrors) 1 else 0
+                    
+                    _sandboxMemoryUsed.value = "${String.format("%.1f", (3..12).random() + (0..9).random()/10f)} MB"
+                    _sandboxTimeMs.value = (10..450).random().toLong()
+
+                    if (hasErrors && _isSelfHealingEnabled.value) {
+                        if (attempt < maxAttempts) {
+                            _sandboxConsoleOutput.value += "\n[SELF-HEAL] Error detected. Initiating automated repair loop with Bug Hunter agent...\n"
+                            
+                            val bugHunterAgent = allAgents.value.find { 
+                                it.name.lowercase().contains("bug hunter") || it.role.lowercase().contains("critic") 
+                            }
+                            
+                            val repairPrompt = """
+                                You are the Bug Hunter agent. Repair the following code that failed compilation/execution.
+                                
+                                File Path: ${currentFile.filePath}
+                                Language Environment: $language
+                                
+                                Compiler/Runtime Console Output:
+                                $output
+                                
+                                Broken Code:
+                                ```
+                                ${currentFile.content}
+                                ```
+                                
+                                Provide ONLY the fully corrected, fixed file contents. Do not include markdown code block syntax (like ```kotlin or ```py). Do not add conversational intro/outro text. Just output the raw corrected code contents.
+                            """.trimIndent()
+                            
+                            _sandboxConsoleOutput.value += "[SELF-HEAL] Dispatching repair prompt to ${bugHunterAgent?.name ?: "Bug Hunter"}...\n"
+                            
+                            val fixedContentRaw = GeminiService.generate(
+                                repairPrompt, 
+                                bugHunterAgent?.systemPrompt ?: "You are a software bug hunting agent. Correct code syntax and logic errors."
+                            )
+                            
+                            val fixedContent = fixedContentRaw.trim()
+                                .removePrefix("```kotlin")
+                                .removePrefix("```python")
+                                .removePrefix("```py")
+                                .removePrefix("```javascript")
+                                .removePrefix("```js")
+                                .removePrefix("```json")
+                                .removePrefix("```")
+                                .removeSuffix("```")
+                                .trim()
+                            
+                            _sandboxConsoleOutput.value += "[SELF-HEAL] Bug Hunter proposed a fix. Waiting for developer review & consent...\n"
+                            
+                            val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                            selfHealingDeferred = deferred
+                            _pendingSelfHealingPatch.value = currentFile to fixedContent
+                            
+                            val isAccepted = deferred.await()
+                            _pendingSelfHealingPatch.value = null
+                            selfHealingDeferred = null
+                            
+                            if (isAccepted) {
+                                _sandboxConsoleOutput.value += "[SELF-HEAL] Patch accepted. Saving to disk...\n"
+                                val updatedFile = saveFileContentSuspended(currentFile.id, fixedContent)
+                                if (updatedFile != null) {
+                                    currentFile = updatedFile
+                                }
+                            } else {
+                                _sandboxConsoleOutput.value += "[SELF-HEAL] Patch declined. Stopping self-healing loop.\n"
+                                hasErrors = false
+                            }
+                        } else {
+                            _sandboxConsoleOutput.value += "\n[SELF-HEAL] Failed to resolve compilation errors after $maxAttempts attempts. Manual intervention required.\n"
+                        }
+                    }
+                    
+                } catch (e: Exception) {
+                    _sandboxConsoleOutput.value += "\n[FATAL RUNTIME ERROR] Failed to spawn virtual process: ${e.localizedMessage}\n"
+                    _sandboxExitCode.value = -1
+                    _sandboxMemoryUsed.value = "0.0 MB"
+                    _sandboxTimeMs.value = 0L
+                    hasErrors = false
+                }
                 
-                delay(800)
-                _sandboxConsoleOutput.value += "\n--- VIRTUAL RUNTIME OUTPUT ---\n"
-                _sandboxConsoleOutput.value += output
-                _sandboxConsoleOutput.value += "\n--------------------------------\n"
-                
-                val hasErrors = output.lowercase().contains("error") || output.lowercase().contains("exception") || output.lowercase().contains("failed")
-                _sandboxExitCode.value = if (hasErrors) 1 else 0
-                
-                _sandboxMemoryUsed.value = "${String.format("%.1f", (3..12).random() + (0..9).random()/10f)} MB"
-                _sandboxTimeMs.value = (10..450).random().toLong()
-                
-            } catch (e: Exception) {
-                _sandboxConsoleOutput.value += "\n[FATAL RUNTIME ERROR] Failed to spawn virtual process: ${e.localizedMessage}\n"
-                _sandboxExitCode.value = -1
-                _sandboxMemoryUsed.value = "0.0 MB"
-                _sandboxTimeMs.value = 0L
-            } finally {
-                _isSandboxRunning.value = false
+                attempt++
             }
+            _isSandboxRunning.value = false
         }
     }
 
