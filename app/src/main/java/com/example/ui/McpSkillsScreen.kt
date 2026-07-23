@@ -38,8 +38,10 @@ fun McpSkillsScreen(
     val claudeSkills by viewModel.claudeSkills.collectAsState()
     val recommendedSkills by viewModel.recommendedSkills.collectAsState()
     val agents by viewModel.allAgents.collectAsState()
+    val mcpError by viewModel.mcpError.collectAsState()
 
     var showAddServerDialog by remember { mutableStateOf(false) }
+    var showRegistryDialog by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("All") }
 
     val configuration = LocalConfiguration.current
@@ -74,18 +76,46 @@ fun McpSkillsScreen(
                     color = Color.Gray
                 )
             }
-            Button(
-                onClick = { showAddServerDialog = true },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.testTag("add_mcp_server_button")
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add MCP Server", fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { showRegistryDialog = true },
+                    modifier = Modifier.testTag("browse_registry_button")
+                ) {
+                    Icon(Icons.Rounded.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Registry", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = { showAddServerDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.testTag("add_mcp_server_button")
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add MCP Server", fontSize = 12.sp)
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (mcpError != null) {
+            Surface(
+                color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = mcpError ?: "",
+                    color = Color(0xFFEF4444),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // Claude Skills Recommendations Panel
         RecommendationsSection(
@@ -141,13 +171,24 @@ fun McpSkillsScreen(
         }
     }
 
+    if (showRegistryDialog) {
+        RegistryBrowserDialog(
+            viewModel = viewModel,
+            onDismiss = {
+                showRegistryDialog = false
+                viewModel.clearRegistrySearch()
+            }
+        )
+    }
+
     if (showAddServerDialog) {
         var serverName by remember { mutableStateOf("") }
         var serverType by remember { mutableStateOf("GitHub") } // GitHub, Docker, Database, Slack, Filesystem
         var sourceUrl by remember { mutableStateOf("") }
         var configJson by remember { mutableStateOf("{}") }
+        var authToken by remember { mutableStateOf("") }
 
-        val serverTypes = listOf("GitHub", "Docker", "Database", "Slack", "Filesystem")
+        val serverTypes = listOf("Gateway", "GitHub", "Docker", "Database", "Browser", "Search", "Slack", "Filesystem")
 
         AlertDialog(
             onDismissRequest = { showAddServerDialog = false },
@@ -181,7 +222,8 @@ fun McpSkillsScreen(
                                 FilterChip(
                                     selected = serverType == type,
                                     onClick = { serverType = type },
-                                    label = { Text(type, fontSize = 11.sp) }
+                                    label = { Text(type, fontSize = 11.sp) },
+                                    modifier = Modifier.testTag("mcp_server_type_chip_${type}")
                                 )
                             }
                         }
@@ -190,16 +232,24 @@ fun McpSkillsScreen(
                     OutlinedTextField(
                         value = sourceUrl,
                         onValueChange = { sourceUrl = it },
-                        label = { Text(
-                            when (serverType) {
-                                "GitHub" -> "GitHub Repository URL"
-                                "Docker" -> "Docker Image Identifier"
-                                "Database" -> "Database Host/URL"
-                                else -> "Source Connection URL"
-                            }
-                        ) },
+                        label = { Text("MCP Endpoint URL (Streamable HTTP)") },
+                        placeholder = { Text("https://your-mcp-server.example.com/mcp") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("mcp_source_input")
+                    )
+                    Text(
+                        "Must be a real MCP server reachable over HTTP(S) and supporting the Streamable HTTP transport -- local/stdio servers cannot be reached from this app.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
+                    )
+
+                    OutlinedTextField(
+                        value = authToken,
+                        onValueChange = { authToken = it },
+                        label = { Text("Auth Token (optional, sent as Bearer)") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().testTag("mcp_token_input")
                     )
 
                     OutlinedTextField(
@@ -218,7 +268,7 @@ fun McpSkillsScreen(
                 Button(
                     onClick = {
                         if (serverName.isNotBlank() && sourceUrl.isNotBlank()) {
-                            viewModel.addMcpServer(serverName, serverType, sourceUrl, configJson)
+                            viewModel.addMcpServer(serverName, serverType, sourceUrl, configJson, authToken)
                             showAddServerDialog = false
                         }
                     },
@@ -431,7 +481,9 @@ fun McpServersSection(
         } else {
             mcpServers.forEach { server ->
                 val isConnected = server.status == "Connected"
-                
+                val isConnecting = server.status == "Connecting"
+                val isError = server.status == "Error"
+
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF141219)),
                     border = BorderStroke(1.dp, if (isConnected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else Color(0xFF262232)),
@@ -448,9 +500,14 @@ fun McpServersSection(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(
                                     imageVector = when (server.type) {
+                                        "Gateway" -> Icons.Rounded.Hub
                                         "GitHub" -> Icons.Rounded.AccountTree
                                         "Docker" -> Icons.Rounded.Inbox
                                         "Database" -> Icons.Rounded.Storage
+                                        "Browser" -> Icons.Rounded.TravelExplore
+                                        "Search" -> Icons.Rounded.Search
+                                        "Slack" -> Icons.Rounded.ChatBubble
+                                        "Filesystem" -> Icons.Rounded.Folder
                                         else -> Icons.Rounded.Extension
                                     },
                                     contentDescription = null,
@@ -458,23 +515,51 @@ fun McpServersSection(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Column {
-                                    Text(server.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text("${server.type} • ${server.toolsCount} available tools", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(server.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                                        if (isError) {
+                                            Surface(
+                                                color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                                                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    "ERROR",
+                                                    color = Color(0xFFEF4444),
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        "${server.type} • ${if (isConnected) "${server.toolsCount} available tools" else server.status}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
                                 }
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(
                                     onClick = { onToggleStatus(server) },
+                                    enabled = !isConnecting,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isConnected) Color(0xFFE91E63).copy(alpha = 0.15f) else Color(0xFF4CAF50).copy(alpha = 0.15f),
                                         contentColor = if (isConnected) Color(0xFFE91E63) else Color(0xFF4CAF50)
                                     ),
                                     border = BorderStroke(1.dp, if (isConnected) Color(0xFFE91E63) else Color(0xFF4CAF50)),
-                                    modifier = Modifier.height(26.dp),
+                                    modifier = Modifier.height(26.dp).testTag("connect_server_button_${server.id}"),
                                     contentPadding = PaddingValues(horizontal = 8.dp)
                                 ) {
-                                    Text(if (isConnected) "Disconnect" else "Connect", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    if (isConnecting) {
+                                        CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Connecting…", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    } else {
+                                        Text(if (isConnected) "Disconnect" else "Connect", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
 
                                 IconButton(

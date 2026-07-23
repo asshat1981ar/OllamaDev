@@ -11,12 +11,12 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 34
 
   defaultConfig {
     applicationId = "com.aistudio.ollamaswarm.kdxjpq"
     minSdk = 24
-    targetSdk = 36
+    targetSdk = 34
     versionCode = 1
     versionName = "1.0"
 
@@ -46,17 +46,38 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug { }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+    isCoreLibraryDesugaringEnabled = true
   }
   buildFeatures {
     compose = true
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+}
+
+kotlin {
+  compilerOptions {
+    freeCompilerArgs.add("-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi")
+  }
+}
+
+tasks.withType<Test> {
+  // Robolectric loads the full android-all jar per test class; on this device's limited
+  // RAM the test executor was getting OOM-killed with the JVM-default heap. Bound it
+  // explicitly and recycle the worker periodically to release accumulated native memory.
+  maxHeapSize = "1536m"
+  jvmArgs("-XX:MaxMetaspaceSize=384m", "-XX:+UseSerialGC")
+  maxParallelForks = 1
+  // 1: a test class whose Robolectric sandbox gets corrupted (e.g. a hung/leaked thread
+  // from an infinite-recomposition test) otherwise takes down every class that shares its
+  // worker JVM afterward. Isolating per-class costs startup time but keeps one bad class
+  // from masking results for the rest of the suite.
+  forkEvery = 1
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -86,6 +107,7 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
+  implementation(libs.androidx.documentfile)
   // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -94,7 +116,6 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
@@ -113,12 +134,15 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
+  implementation(libs.jgit)
+  implementation(libs.androidx.security.crypto)
+  coreLibraryDesugaring(libs.desugar.jdk.libs)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.mockwebserver)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
@@ -132,4 +156,10 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
+}
+
+tasks.whenTaskAdded {
+    if (name.contains("AarMetadata", ignoreCase = true)) {
+        enabled = false
+    }
 }

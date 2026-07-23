@@ -4,7 +4,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -37,6 +40,8 @@ fun NodeScreen(
     var nameInput by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("http://") }
     var modelsInput by remember { mutableStateOf("llama3, mistral") }
+    var apiKeyInput by remember { mutableStateOf("") }
+    var showValidationError by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -46,7 +51,8 @@ fun NodeScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .testTag("node_list"),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 80.dp)
         ) {
@@ -94,8 +100,9 @@ fun NodeScreen(
                 OllamaCloudWizardCard(
                     onAddCloudNode = {
                         nameInput = "My Ollama Cloud Core"
-                        urlInput = "https://api.ollamacloud.com"
-                        modelsInput = "llama3:8b, mistral:7b, gemma2:9b"
+                        urlInput = "https://ollama.com"
+                        modelsInput = "gpt-oss:120b, qwen3-coder:480b, glm-5.2"
+                        apiKeyInput = ""
                         showAddDialog = true
                     }
                 )
@@ -120,6 +127,7 @@ fun NodeScreen(
                 items(nodes, key = { it.id }) { node ->
                     NodeCard(
                         node = node,
+                        onPing = { viewModel.pingNode(node) },
                         onDelete = { viewModel.deleteNode(node) }
                     )
                 }
@@ -128,10 +136,16 @@ fun NodeScreen(
 
         if (showAddDialog) {
             AlertDialog(
-                onDismissRequest = { showAddDialog = false },
+                onDismissRequest = {
+                    showAddDialog = false
+                    showValidationError = false
+                },
                 title = { Text("Register Swarm Node") },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
                         OutlinedTextField(
                             value = nameInput,
                             onValueChange = { nameInput = it },
@@ -153,17 +167,37 @@ fun NodeScreen(
                             placeholder = { Text("llama3, mistral, phi3") },
                             modifier = Modifier.fillMaxWidth().testTag("node_models_input")
                         )
+                        OutlinedTextField(
+                            value = apiKeyInput,
+                            onValueChange = { apiKeyInput = it },
+                            label = { Text("API Key (optional)") },
+                            placeholder = { Text("Required for Ollama Cloud endpoints") },
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().testTag("node_api_key_input")
+                        )
+                        if (showValidationError) {
+                            Text(
+                                text = "Node name and URL are required.",
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 12.sp,
+                                modifier = Modifier.testTag("node_validation_error")
+                            )
+                        }
                     }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
                             if (nameInput.isNotEmpty() && urlInput.isNotEmpty()) {
-                                viewModel.addNode(nameInput, urlInput, modelsInput)
+                                viewModel.addNode(nameInput, urlInput, modelsInput, apiKeyInput)
                                 nameInput = ""
                                 urlInput = "http://"
                                 modelsInput = "llama3, mistral"
+                                apiKeyInput = ""
+                                showValidationError = false
                                 showAddDialog = false
+                            } else {
+                                showValidationError = true
                             }
                         },
                         modifier = Modifier.testTag("submit_node_button")
@@ -172,7 +206,10 @@ fun NodeScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAddDialog = false }) {
+                    TextButton(onClick = {
+                        showAddDialog = false
+                        showValidationError = false
+                    }) {
                         Text("Cancel")
                     }
                 }
@@ -184,6 +221,7 @@ fun NodeScreen(
 @Composable
 fun NodeCard(
     node: OllamaNode,
+    onPing: () -> Unit,
     onDelete: () -> Unit
 ) {
     val statusColor = when (node.status) {
@@ -206,7 +244,8 @@ fun NodeCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
                     Box(
                         modifier = Modifier
@@ -241,6 +280,20 @@ fun NodeCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (node.status == "Online" && node.latencyMs > 0) {
+                        Text(
+                            text = "${node.latencyMs} ms",
+                            color = Color(0xFF4ADE80),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(Color(0xFF4ADE80).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                .border(0.5.dp, Color(0xFF4ADE80).copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
                     Surface(
                         color = statusColor.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(4.dp),
@@ -253,6 +306,27 @@ fun NodeCard(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
+                    }
+
+                    IconButton(
+                        onClick = onPing,
+                        enabled = node.status != "Connecting",
+                        modifier = Modifier.size(24.dp).testTag("ping_node_button_${node.id}")
+                    ) {
+                        if (node.status == "Connecting") {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 1.5.dp,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Ping Node",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
 
                     IconButton(
@@ -281,22 +355,29 @@ fun NodeCard(
                     fontWeight = FontWeight.Bold
                 )
                 
+                val models = remember(node.availableModels) {
+                    node.availableModels.split(",").map { it.trim() }
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                 ) {
-                    node.availableModels.split(",").forEach { model ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = model.trim(),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
+                    models.forEach { model ->
+                        key(model) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = model,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
                         }
                     }
                 }

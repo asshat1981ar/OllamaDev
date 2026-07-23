@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -76,6 +77,7 @@ fun DashboardScreen(
             ) {
                 DashboardHeader()
                 StatsSummaryRow(nodes, isExecuting)
+                AnalyticsSavingsRow(viewModel)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -126,6 +128,10 @@ fun DashboardScreen(
 
             item {
                 StatsSummaryRow(nodes, isExecuting)
+            }
+
+            item {
+                AnalyticsSavingsRow(viewModel)
             }
 
             item {
@@ -340,10 +346,10 @@ fun SwarmActiveGraph(agents: List<Agent>, isExecuting: Boolean) {
             
             val displayAgents = agents.take(4).ifEmpty {
                 listOf(
-                    Agent(name = "Researcher", role = "Researcher", modelName = "gemini", systemPrompt = "", colorHex = "#3F51B5"),
+                    Agent(name = "Researcher", role = "Researcher", modelName = "llama3", systemPrompt = "", colorHex = "#3F51B5"),
                     Agent(name = "Programmer", role = "Programmer", modelName = "llama3", systemPrompt = "", colorHex = "#4CAF50"),
                     Agent(name = "Critic", role = "Critic", modelName = "mistral", systemPrompt = "", colorHex = "#E91E63"),
-                    Agent(name = "Executive", role = "Executive", modelName = "gemini", systemPrompt = "", colorHex = "#FF9800")
+                    Agent(name = "Executive", role = "Executive", modelName = "mistral", systemPrompt = "", colorHex = "#FF9800")
                 )
             }
 
@@ -414,7 +420,7 @@ fun AgentNodeBadge(agent: Agent, nodeNum: Int, isAnimating: Boolean) {
             val icon = when (agent.role.lowercase()) {
                 "researcher" -> Icons.Rounded.Search
                 "programmer" -> Icons.Rounded.Terminal
-                "critic" -> Icons.Rounded.Grading
+                "critic" -> Icons.AutoMirrored.Rounded.Grading
                 "executive" -> Icons.Rounded.CheckCircle
                 else -> Icons.Rounded.SmartToy
             }
@@ -511,7 +517,7 @@ fun SwarmRowItem(swarm: SwarmConfig, onClick: () -> Unit) {
     ) {
         val modeIcon = when (swarm.coordinationMode) {
             "SEQUENTIAL" -> Icons.Rounded.FormatListNumbered
-            "PEER_TO_PEER" -> Icons.Rounded.CompareArrows
+            "PEER_TO_PEER" -> Icons.AutoMirrored.Rounded.CompareArrows
             "CONSENSUS_VOTE" -> Icons.Rounded.HowToVote
             else -> Icons.Rounded.DynamicFeed
         }
@@ -577,7 +583,7 @@ fun NodesStatusSection(nodes: List<OllamaNode>, onRefresh: () -> Unit) {
                 )
                 IconButton(
                     onClick = onRefresh,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(24.dp).testTag("refresh_nodes_button")
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Refresh,
@@ -652,7 +658,9 @@ fun NodeMiniRow(node: OllamaNode) {
                 color = statusColor,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                modifier = Modifier
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .testTag("node_status_${node.id}")
             )
         }
     }
@@ -822,7 +830,7 @@ fun DashboardAgentCard(
                         val icon = when (agent.role.lowercase()) {
                             "researcher" -> Icons.Rounded.Search
                             "programmer" -> Icons.Rounded.Terminal
-                            "critic" -> Icons.Rounded.Grading
+                            "critic" -> Icons.AutoMirrored.Rounded.Grading
                             "executive" -> Icons.Rounded.CheckCircle
                             else -> Icons.Rounded.SmartToy
                         }
@@ -906,5 +914,39 @@ fun DashboardAgentCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun AnalyticsSavingsRow(viewModel: SwarmViewModel) {
+    val totalTokens by viewModel.totalTokensUsed.collectAsState()
+    val totalSavings by viewModel.totalCostSavingsUsd.collectAsState()
+    val totalSandboxRuns by viewModel.totalSandboxRuns.collectAsState()
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        StatCard(
+            title = "Tokens Processed",
+            value = if (totalTokens >= 1000) String.format("%.1fk", totalTokens / 1000f) else "$totalTokens",
+            icon = Icons.Rounded.Analytics,
+            tint = Color(0xFF818CF8),
+            modifier = Modifier.weight(1f)
+        )
+        StatCard(
+            title = "API Cost Savings",
+            value = String.format("$%.3f", totalSavings),
+            icon = Icons.Rounded.Paid,
+            tint = Color(0xFF34D399),
+            modifier = Modifier.weight(1f)
+        )
+        StatCard(
+            title = "Sandbox Compiles",
+            value = "$totalSandboxRuns",
+            icon = Icons.Rounded.Computer,
+            tint = Color(0xFFFB923C),
+            modifier = Modifier.weight(1f)
+        )
     }
 }

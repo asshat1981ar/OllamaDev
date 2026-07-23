@@ -9,7 +9,9 @@ data class OllamaNode(
     val name: String,
     val url: String,
     val status: String = "Offline", // Online, Offline, Connecting
-    val availableModels: String = "llama3, mistral, phi3" // Comma-separated list
+    val availableModels: String = "llama3, mistral, phi3", // Comma-separated list
+    val latencyMs: Int = -1,
+    val apiKey: String? = null // Bearer token for authenticated endpoints (e.g. Ollama Cloud)
 )
 
 @Entity(tableName = "agents")
@@ -17,7 +19,7 @@ data class Agent(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
     val role: String, // Researcher, Programmer, Critic, Executive, Writer, etc.
-    val modelName: String, // e.g., llama3:8b, mistral:7b, phi3, gemini-3.5-flash
+    val modelName: String, // e.g., llama3:8b, mistral:7b, phi3
     val systemPrompt: String,
     val colorHex: String, // Hex color code for agent's theme
     val isSystemTemplate: Boolean = false
@@ -61,7 +63,10 @@ data class WorkspaceFile(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val filePath: String,
     val content: String,
-    val lastModified: Long = System.currentTimeMillis()
+    val lastModified: Long = System.currentTimeMillis(),
+    val sourceUri: String? = null,
+    val isConflict: Boolean = false,
+    val conflictContent: String? = null
 )
 
 @Entity(tableName = "chat_messages")
@@ -80,7 +85,8 @@ data class GitCommit(
     val commitHash: String,
     val author: String,
     val message: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val taskId: Int? = null // links an agentic-loop checkpoint/commit back to the SwarmTask that created it
 )
 
 @Entity(tableName = "mcp_servers")
@@ -94,6 +100,17 @@ data class McpServer(
     val configuredParams: String = "{}" // Configuration parameters in JSON
 )
 
+@Entity(tableName = "mcp_tools")
+data class McpToolEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val serverId: Int,
+    val name: String,
+    val description: String?,
+    val inputSchemaJson: String = "{}",
+    val outputSchemaJson: String? = null,
+    val annotationsJson: String? = null
+)
+
 @Entity(tableName = "claude_skills")
 data class ClaudeSkill(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
@@ -103,6 +120,7 @@ data class ClaudeSkill(
     val isRecommended: Boolean = false,
     val isEnabled: Boolean = false,
     val usageExample: String = "",
-    val requiredMcpServerType: String = "None"
+    val requiredMcpServerType: String = "None",
+    val sourceToolName: String? = null // Binds this skill to a real MCP tool name
 )
 

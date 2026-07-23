@@ -17,22 +17,24 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ChatMessage::class,
         GitCommit::class,
         McpServer::class,
+        McpToolEntity::class,
         ClaudeSkill::class
     ],
-    version = 3,
+    version = 13,
     exportSchema = false
 )
-abstract class AppDatabase : RoomDatabase() {
-    abstract fun ollamaNodeDao(): OllamaNodeDao
-    abstract fun agentDao(): AgentDao
-    abstract fun swarmConfigDao(): SwarmConfigDao
-    abstract fun swarmTaskDao(): SwarmTaskDao
-    abstract fun taskStepDao(): TaskStepDao
-    abstract fun workspaceFileDao(): WorkspaceFileDao
-    abstract fun chatMessageDao(): ChatMessageDao
-    abstract fun gitCommitDao(): GitCommitDao
-    abstract fun mcpServerDao(): McpServerDao
-    abstract fun claudeSkillDao(): ClaudeSkillDao
+abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
+    abstract override fun ollamaNodeDao(): OllamaNodeDao
+    abstract override fun agentDao(): AgentDao
+    abstract override fun swarmConfigDao(): SwarmConfigDao
+    abstract override fun swarmTaskDao(): SwarmTaskDao
+    abstract override fun taskStepDao(): TaskStepDao
+    abstract override fun workspaceFileDao(): WorkspaceFileDao
+    abstract override fun chatMessageDao(): ChatMessageDao
+    abstract override fun gitCommitDao(): GitCommitDao
+    abstract override fun mcpServerDao(): McpServerDao
+    abstract override fun mcpToolDao(): McpToolDao
+    abstract override fun claudeSkillDao(): ClaudeSkillDao
 
     companion object {
         @Volatile
@@ -45,11 +47,25 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "ollama_swarm_database"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(true)
                 .addCallback(DatabaseSeederCallback())
                 .build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        /**
+         * Resets the singleton instance and deletes the underlying database file(s).
+         * The next call to [getDatabase] will create a fresh database and re-run seeders.
+         * Intended for test isolation.
+         */
+        fun reset(context: Context) {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
+                val dbName = "ollama_swarm_database"
+                context.deleteDatabase(dbName)
             }
         }
     }
@@ -58,45 +74,53 @@ abstract class AppDatabase : RoomDatabase() {
         override fun onCreate(db: SupportSQLiteDatabase) {
             super.onCreate(db)
             
-            // Seed Agents
+            // Seed SDLC Agents
             db.execSQL(
                 """
-                INSERT INTO agents (id, name, role, modelName, systemPrompt, colorHex, isSystemTemplate) VALUES 
-                (1, 'Apex Researcher', 'Researcher', 'llama3:8b', 'You are a professional research agent specializing in exhaustive, accurate, and structured inquiries. Your job is to gather and present clear information.', '#3F51B5', 1),
-                (2, 'Byte Code', 'Programmer', 'codegemma:7b', 'You are an elite, concise software engineer. Write pristine, commented, and performant code based on prompt requirements.', '#4CAF50', 1),
-                (3, 'Aura Critic', 'Critic', 'mistral:7b', 'You are a critical reviewer. Analyze the researcher''s output and the programmer''s code for potential logical loopholes, edge cases, bugs, or omissions.', '#E91E63', 1),
-                (4, 'Synthesizer', 'Executive', 'gemma2:9b', 'You are an executive coordinator agent. Your job is to synthesize conflicting opinions, edit draft reports, and make the final polished response.', '#FF9800', 1)
+                INSERT INTO agents (id, name, role, modelName, systemPrompt, colorHex, isSystemTemplate) VALUES
+                (1, 'Spec Architect', 'Product Manager', 'deepseek-v4-pro', 'You are an expert Product Manager and Spec Architect. Your job is to translate user requirements into detailed, structured, and clear feature specifications and user stories.', '#9C27B0', 1),
+                (2, 'Byte Code', 'Programmer', 'qwen3-coder:480b', 'You are an elite, concise software engineer. Write pristine, commented, and performant code based on prompt requirements and architectural guidelines.', '#4CAF50', 1),
+                (3, 'Aura Critic', 'Critic', 'kimi-k2.6', 'You are a critical code reviewer. Analyze code changes, test suites, and pull requests for potential logical loopholes, edge cases, bugs, or architectural violations.', '#E91E63', 1),
+                (4, 'Core Architect', 'Architect', 'gpt-oss:120b', 'You are a Senior System Architect. Your job is to design robust system architectures, define clean API contracts, design database schemas, and establish implementation patterns.', '#2196F3', 1),
+                (5, 'Bug Hunter', 'QA Engineer', 'deepseek-v4-pro', 'You are an automated QA & Testing Specialist. Your job is to design comprehensive unit/integration test plans, write JUnit/Compose tests, and execute test suites.', '#FF9800', 1),
+                (6, 'Shield Guard', 'Security Auditor', 'kimi-k2.6', 'You are a DevSecOps Security Auditor. Your job is to analyze code for security vulnerabilities, OWASP Top 10 issues, hardcoded credentials, and package dependencies risks.', '#F44336', 1),
+                (7, 'Pipeline Deployer', 'DevOps Engineer', 'qwen3-coder:480b', 'You are a DevOps and Release Engineer. Your job is to configure CI/CD pipelines, compose Dockerfiles, write Gradle deployment tasks, and monitor build outputs.', '#009688', 1)
                 """.trimIndent()
             )
 
-            // Seed Swarm Configurations
+            // Seed SDLC Swarm Configurations
             db.execSQL(
                 """
                 INSERT INTO swarm_configs (id, name, description, coordinationMode, agentIds) VALUES 
-                (1, 'Research & Synthesize Swarm', 'A highly organized pipeline where Researcher gathers raw data, Critic audits it, and Synthesizer crafts the final comprehensive report.', 'SEQUENTIAL', '1,3,4'),
-                (2, 'Elite Code Engineer Swarm', 'A specialized collaborative engine where Researcher plans the algorithm, Byte Code implements the logic, Aura Critic tests it, and Synthesizer formats it.', 'PEER_TO_PEER', '1,2,3,4'),
-                (3, 'Decentralized Consensus Swarm', 'A flat collaborative group that analyzes tasks in parallel and runs a consensus voting mechanism to choose the best option.', 'CONSENSUS_VOTE', '1,2,3')
+                (1, 'SDLC Spec & Design Swarm', 'Product Spec Architect gathers details and designs the specification, then Tech Lead drafts the architecture, and Critic audits for technical constraints.', 'SEQUENTIAL', '1,4,3'),
+                (2, 'Feature Implementation Swarm', 'Core Architect defines API contracts, Byte Code implements code, and Bug Hunter writes unit/integration tests to ensure full coverage.', 'PEER_TO_PEER', '4,2,5'),
+                (3, 'SecOps Build & Release Swarm', 'Byte Code edits files, Shield Guard performs security audits, and Pipeline Deployer runs the CI build and stages deployment configurations.', 'SEQUENTIAL', '2,6,7'),
+                (4, 'Full Auto-SDLC Swarm', 'An end-to-end SDLC pipeline: Spec Architect designs, Core Architect structures, Byte Code implements, Bug Hunter tests, Shield Guard audits, and Pipeline Deployer builds.', 'SEQUENTIAL', '1,4,2,5,6,7'),
+                (5, 'Adaptive Dynamic Routing Swarm', 'Orchestrator analyzes requirements at runtime, selects the optimal agents, builds a dynamic routing path, and synthesizes the final outputs.', 'DYNAMIC_ROUTING', '1,4,2,3,5'),
+                (6, 'Autonomous Coding Harness', 'A Replit-Agent/Manus-AI-style autonomous plan-act-verify loop: Core Architect plans and assigns roles, Byte Code implements each step, and Bug Hunter verifies every step (invoking real MCP tooling when available) before checkpointing progress.', 'AGENTIC_LOOP', '4,2,5')
                 """.trimIndent()
             )
 
-            // Seed Ollama Nodes
+            // Seed Ollama Nodes. All non-loopback nodes start "Offline" with unknown latency
+            // until the user actually pings them (refreshNodes/pingNode) -- we don't fabricate
+            // a live connection status for a node the app has never contacted.
             db.execSQL(
                 """
-                INSERT INTO ollama_nodes (id, name, url, status, availableModels) VALUES 
-                (1, 'Local Node (Loopback)', 'http://127.0.0.1:11434', 'Offline', 'llama3, mistral, phi3'),
-                (2, 'Decentralized Swarm-Peer A', 'http://192.168.1.154:11434', 'Online', 'llama3, mistral'),
-                (3, 'Autonomous Edge Node B', 'http://10.0.0.42:11434', 'Online', 'phi3'),
-                (4, 'Ollama Cloud Gateway', 'https://api.ollamacloud.com', 'Online', 'llama3:8b, mistral:7b, phi3, qwen2:7b, gemma2:9b, codegemma:7b')
+                INSERT INTO ollama_nodes (id, name, url, status, availableModels, latencyMs) VALUES
+                (1, 'Local Node (Loopback)', 'http://127.0.0.1:11434', 'Offline', 'llama3, mistral, phi3', -1),
+                (2, 'Decentralized Swarm-Peer A', 'http://192.168.1.154:11434', 'Offline', 'llama3, mistral', -1),
+                (3, 'Autonomous Edge Node B', 'http://10.0.0.42:11434', 'Offline', 'phi3', -1),
+                (4, 'Ollama Cloud Gateway', 'https://ollama.com', 'Offline', 'gpt-oss:120b, qwen3-coder:480b, glm-5.2, kimi-k2.6, deepseek-v4-pro, minimax-m3', -1)
                 """.trimIndent()
             )
 
             // Seed Workspace Files
             db.execSQL(
                 """
-                INSERT INTO workspace_files (id, filePath, content, lastModified) VALUES 
-                (1, 'README.md', '# Swarm Intelligence Workspace\n\nWelcome to your decentralized agent workspace! Here, you can write code, collaborate with your autonomous swarm, and deploy changes directly via Git.\n\n### Current Stack\n- Autonomous coordination mode: PEER_TO_PEER\n- Active local Node: Local Node (Loopback)\n- Active Agents: Researcher, Programmer, Critic, Executive', 1718010000000),
-                (2, 'main.py', 'def coordinate_swarm(agents, task):\n    print(f"Initializing swarm coordination for: {task}")\n    proposals = []\n    for agent in agents:\n        proposal = agent.propose(task)\n        proposals.append(proposal)\n    \n    consensus = synthesize_proposals(proposals)\n    return consensus\n\ndef synthesize_proposals(proposals):\n    print("Criticizing and merging code proposals...")\n    return "def consolidated_result():\n    return True"', 1718012000000),
-                (3, 'agent_config.json', '{\n  "swarm_codename": "project-nebula",\n  "version": "1.0.4",\n  "security_mode": "strict",\n  "auto_commit": false\n}', 1718014000000)
+                INSERT INTO workspace_files (id, filePath, content, lastModified, isConflict) VALUES
+                (1, 'workspace/auth_spec.md', '# User Authentication Specification\n\n## Requirements\n- Register a new user with username and password.\n- Authenticate user credentials and return a stateless JWT token.\n- Secure token validation on API endpoints.\n\n## Architecture\n- /register -> Store username + salted password hash.\n- /login -> Generate signed JWT token with 1-hour expiry.', 1718010000000, 0),
+                (2, 'auth.py', 'import jwt\nimport datetime\n\nSECRET = "super-secret-swarm-key"\n\ndef generate_token(username):\n    payload = {\n        "sub": username,\n        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)\n    }\n    return jwt.encode(payload, SECRET, algorithm="HS256")\n\ndef verify_token(token):\n    try:\n        return jwt.decode(token, SECRET, algorithms=["HS256"])\n    except jwt.ExpiredSignatureError:\n        return "Token expired"\n    except jwt.InvalidTokenError:\n        return "Invalid token"', 1718012000000, 0),
+                (3, 'tests/test_auth.py', 'import unittest\nfrom auth import generate_token, verify_token\n\nclass TestAuth(unittest.TestCase):\n    def test_token_valid(self):\n        token = generate_token("admin")\n        payload = verify_token(token)\n        self.assertEqual(payload["sub"], "admin")\n\nif __name__ == "__main__":\n    unittest.main()', 1718014000000, 0)
                 """.trimIndent()
             )
 
@@ -104,33 +128,44 @@ abstract class AppDatabase : RoomDatabase() {
             db.execSQL(
                 """
                 INSERT INTO chat_messages (id, sender, role, message, timestamp, colorHex) VALUES 
-                (1, 'System', 'system', 'Decentralized Swarm Chat channel initialized. You can chat directly with your active swarm configurations.', 1718010000000, '#9E9E9E'),
-                (2, 'Apex Researcher', 'agent', 'Hello! I am ready to research codebase modifications or answer queries. Ask me anything about the repository.', 1718010100000, '#3F51B5'),
-                (3, 'Byte Code', 'agent', 'System online. Point me to any file in the browser, and I can refactor or optimize it.', 1718010200000, '#4CAF50')
+                (1, 'System', 'system', 'Decentralized Swarm SDLC Automation channel initialized. Active swarm configurations are ready to accept tasks.', 1718010000000, '#9E9E9E'),
+                (2, 'Spec Architect', 'agent', 'Auth module specifications drafted in workspace/auth_spec.md. Core Architect, please define the service boundaries.', 1718010100000, '#9C27B0'),
+                (3, 'Core Architect', 'agent', 'Auth specs analyzed. We will build a stateless JWT-based service. Byte Code, implement the token generation and validation logic in auth.py.', 1718010200000, '#2196F3'),
+                (4, 'Byte Code', 'agent', 'Understood, starting work on auth.py with SHA-256 signatures.', 1718010300000, '#4CAF50'),
+                (5, 'Bug Hunter', 'agent', 'I am preparing unit tests for token expiration and signature manipulation payloads.', 1718010400000, '#FF9800')
                 """.trimIndent()
             )
 
-            // Seed MCP Servers
+            // Seed MCP Servers. Because Android cannot spawn local stdio MCP servers, these URLs
+            // point to example local/self-hosted Streamable-HTTP endpoints (e.g. a gateway or bridge).
+            // A real "Connected" status is only set after a genuine initialize+tools/list handshake.
             db.execSQL(
                 """
                 INSERT INTO mcp_servers (id, name, type, sourceUrl, status, toolsCount, configuredParams) VALUES
-                (1, 'GitHub MCP Integration', 'GitHub', 'https://github.com/modelcontextprotocol/servers/tree/main/src/github', 'Connected', 8, '{"repo":"example-repo","token":"ghp_xxxxxxxxxxxx"}'),
-                (2, 'Docker Container Engine', 'Docker', 'https://github.com/modelcontextprotocol/servers/tree/main/src/docker', 'Connected', 5, '{"host":"unix:///var/run/docker.sock"}'),
-                (3, 'PostgreSQL Database Analyzer', 'Database', 'https://github.com/modelcontextprotocol/servers/tree/main/src/postgres', 'Disconnected', 6, '{"connectionString":"postgresql://localhost:5432/production"}'),
-                (4, 'Puppeteer Browser Automation', 'Docker', 'https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer', 'Disconnected', 4, '{"headless":true}')
+                (1, 'Local MCP Gateway', 'Gateway', 'http://localhost:3000/mcp', 'Disconnected', 0, '{}'),
+                (2, 'SearXNG Search Bridge', 'Search', 'http://localhost:3002/mcp', 'Disconnected', 0, '{}'),
+                (3, 'Private GitHub MCP', 'GitHub', 'http://localhost:3003/mcp', 'Disconnected', 0, '{"repo":"owner/repo"}'),
+                (4, 'Workspace Postgres', 'Database', 'http://localhost:3004/mcp', 'Disconnected', 0, '{"connectionString":"postgresql://localhost:5432/app"}'),
+                (5, 'Browser Automation', 'Browser', 'http://localhost:3005/mcp', 'Disconnected', 0, '{"headless":true}')
                 """.trimIndent()
             )
 
-            // Seed Claude Skills
+            // Seed Claude Skills. Skills 7-10 map to native GitService/local compilation features
+            // instead of MCP servers, so they don't require any MCP server connection.
+            // sourceToolName is NULL for manually authored skills; auto-generated skills bind to real MCP tool names.
             db.execSQL(
                 """
-                INSERT INTO claude_skills (id, name, description, category, isRecommended, isEnabled, usageExample, requiredMcpServerType) VALUES
-                (1, 'GitHub Search & Pull', 'Search and manage issues, pull requests, and repositories using the GitHub MCP client.', 'Development', 1, 1, 'Search pull requests with query "bugfix" in example-repo', 'GitHub'),
-                (2, 'Docker Lifecycle Monitor', 'Monitor docker containers, list active tasks, view performance graphs, and inspect configurations.', 'Automation', 1, 1, 'List running docker containers and show port mappings', 'Docker'),
-                (3, 'Postgres SQL Optimizer', 'Examine Postgres schemas, run EXPLAIN queries, and automatically optimize database indexes.', 'Analysis', 0, 0, 'Analyze table "users" and recommend optimal column indexes', 'Database'),
-                (4, 'Automated Integration Tester', 'Simulate end-to-end user actions in headful browser environments using Puppeteer scripts.', 'Automation', 1, 0, 'Run Puppeteer E2E tests against live dev server on localhost:3000', 'Docker'),
-                (5, 'Code Linter & Formatter', 'Fast sandboxed syntax check, format, and style linting on code blocks prior to commits.', 'Development', 1, 1, 'Lint current active python or JS files with formatting recommendations', 'None'),
-                (6, 'Research Web Crawler', 'Leverage Brave / Google Search MCP server to browse, clean, and summarize web documentation.', 'Productivity', 1, 0, 'Summarize latest Jetpack Compose Room integration features', 'None')
+                INSERT INTO claude_skills (id, name, description, category, isRecommended, isEnabled, usageExample, requiredMcpServerType, sourceToolName) VALUES
+                (1, 'GitHub Search & Pull', 'Search and manage issues, pull requests, and repositories using the GitHub MCP client.', 'Development', 1, 1, 'Search pull requests with query "bugfix" in example-repo', 'GitHub', NULL),
+                (2, 'Docker Lifecycle Monitor', 'Monitor docker containers, list active tasks, view performance graphs, and inspect configurations.', 'Automation', 1, 1, 'List running docker containers and show port mappings', 'Docker', NULL),
+                (3, 'Postgres SQL Optimizer', 'Examine Postgres schemas, run EXPLAIN queries, and automatically optimize database indexes.', 'Analysis', 0, 0, 'Analyze table "users" and recommend optimal column indexes', 'Database', NULL),
+                (4, 'Automated Integration Tester', 'Simulate end-to-end user actions in headful browser environments using Puppeteer scripts.', 'Automation', 1, 0, 'Run Puppeteer E2E tests against live dev server on localhost:3000', 'Browser', NULL),
+                (5, 'Code Linter & Formatter', 'Fast sandboxed syntax check, format, and style linting on code blocks prior to commits.', 'Development', 1, 1, 'Lint current active python or JS files with formatting recommendations', 'None', NULL),
+                (6, 'Research Web Crawler', 'Leverage Brave / Google Search MCP server to browse, clean, and summarize web documentation.', 'Productivity', 1, 0, 'Summarize latest Jetpack Compose Room integration features', 'None', NULL),
+                (7, 'Git Branch Creator', 'Create and check out new local Git branches for code tasks.', 'Development', 1, 1, 'git branch feature/auth-fix', 'None', NULL),
+                (8, 'Git Auto-Stager & Committer', 'Stage modified files and write clean conventional commits automatically.', 'Development', 1, 1, 'git commit -am "feat: add user authentication tokens"', 'None', NULL),
+                (9, 'Automated Compiler Self-Healer', 'Verify Kotlin compilation and run auto-repair loops on code errors.', 'Automation', 1, 1, 'Check kotlin compilation syntax and run healing loop', 'None', NULL),
+                (10, 'Gradle Test Runner', 'Run local Gradle test tasks and parse trace reports.', 'Automation', 1, 1, 'gradle test :app', 'None', NULL)
                 """.trimIndent()
             )
         }

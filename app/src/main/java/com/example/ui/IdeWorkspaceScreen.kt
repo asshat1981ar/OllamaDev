@@ -13,12 +13,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -32,28 +34,95 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.BasicTextField
 import com.example.data.WorkspaceFile
-import com.example.data.ChatMessage
 import com.example.data.GitCommit
 import com.example.viewmodel.SwarmViewModel
-import kotlinx.coroutines.launch
 
+/**
+ * The "computer panel" reused by SessionScreen: file explorer, code editor, and GitHub
+ * integration. Chat is intentionally not part of this panel -- Session's own transcript is the
+ * conversational surface now, so this is purely the file/editor/git workspace context.
+ */
 @Composable
-fun IdeWorkspaceScreen(
+fun WorkspacePanel(
     viewModel: SwarmViewModel,
     modifier: Modifier = Modifier
 ) {
     val files by viewModel.workspaceFiles.collectAsState()
     val selectedFile by viewModel.selectedFile.collectAsState()
-    val messages by viewModel.chatMessages.collectAsState()
     val commits by viewModel.gitCommits.collectAsState()
     
     val repoName by viewModel.gitRepoName.collectAsState()
     val codename by viewModel.gitCodename.collectAsState()
+    val gitRemoteUrl by viewModel.gitRemoteUrl.collectAsState()
     val isSynced by viewModel.isGitSynced.collectAsState()
     val isSyncing by viewModel.isGitSyncing.collectAsState()
+    val gitError by viewModel.gitError.collectAsState()
+
+    val rootFolderUri by viewModel.rootFolderUri.collectAsState()
+    val rootFolderName by viewModel.rootFolderName.collectAsState()
+
+    val pendingSelfHealingPatch by viewModel.pendingSelfHealingPatch.collectAsState()
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+
+    pendingSelfHealingPatch?.let { (file, proposedContent) ->
+        AlertDialog(
+            onDismissRequest = { viewModel.declineSelfHealingPatch() },
+            title = { Text("AI Self-Healing: Proposed Code Fix") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "File: ${file.filePath}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "The Bug Hunter agent calculated the following code patch to resolve compiler errors. Review and apply:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .background(Color(0xFF0F0E12), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, Color(0xFF231E29)), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = "--- ORIGINAL CODE ---\n${file.content}\n\n--- PROPOSED CODE ---\n$proposedContent",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFECEFF1),
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.acceptSelfHealingPatch() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    modifier = Modifier.testTag("self_healing_accept_button")
+                ) {
+                    Text("Apply Patch", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.declineSelfHealingPatch() },
+                    modifier = Modifier.testTag("self_healing_decline_button")
+                ) {
+                    Text("Decline Patch")
+                }
+            }
+        )
+    }
     
     var activeSubTab by remember { mutableStateOf("files") } // "files", "git", "chat"
     val configuration = LocalConfiguration.current
@@ -82,6 +151,17 @@ fun IdeWorkspaceScreen(
             }
         }
     }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            viewModel.importFolder(treeUri)
+        }
+    }
+
+    val isImportingFolder by viewModel.isImportingFolder.collectAsState()
+    val folderImportStatus by viewModel.folderImportStatus.collectAsState()
 
     Row(
         modifier = modifier
@@ -129,29 +209,38 @@ fun IdeWorkspaceScreen(
                             onFileSelect = { viewModel.selectFile(it) },
                             onFileDelete = { viewModel.deleteFile(it) },
                             onUploadClick = { filePickerLauncher.launch("*/*") },
-                            onNewFileCreate = { name, code -> viewModel.createFile(name, code) }
+                            onNewFileCreate = { name, code -> viewModel.createFile(name, code) },
+                            onOpenFolderClick = { folderPickerLauncher.launch(null) },
+                            isImportingFolder = isImportingFolder,
+                            folderImportStatus = folderImportStatus,
+                            rootFolderUri = rootFolderUri,
+                            rootFolderName = rootFolderName,
+                            onSyncClick = { viewModel.syncWorkspace() },
+                            onDisconnectClick = { viewModel.disconnectFolder() }
                         )
                     } else {
                         GithubIntegrationSection(
                             repoName = repoName,
                             codename = codename,
+                            remoteUrl = gitRemoteUrl,
                             commits = commits,
                             isSynced = isSynced,
                             isSyncing = isSyncing,
-                            onSettingsUpdate = { repo, code -> viewModel.updateGitSettings(repo, code) },
+                            gitError = gitError,
+                            onSettingsUpdate = { repo, code, remote, token -> viewModel.updateGitSettings(repo, code, remote, token) },
                             onCommit = { viewModel.commitChanges(it) },
-                            onPush = { viewModel.pushToGit() }
+                            onPush = { viewModel.pushToGit() },
+                            onRevert = { viewModel.revertToCheckpoint(it) }
                         )
                     }
                 }
             }
 
-            // Pane 2: Code Editor (45% weight)
+            // Pane 2: Code Editor (remaining width)
             Column(
                 modifier = Modifier
                     .weight(1.8f)
                     .fillMaxHeight()
-                    .border(BorderStroke(1.dp, Color(0xFF1F1929)), RoundedCornerShape(0.dp))
                     .padding(12.dp)
             ) {
                 CodeEditorSection(
@@ -161,21 +250,6 @@ fun IdeWorkspaceScreen(
                     onSave = { id, content -> viewModel.saveFile(id, content) }
                 )
             }
-
-            // Pane 3: Chat Pane (30% weight)
-            Column(
-                modifier = Modifier
-                    .weight(1.2f)
-                    .fillMaxHeight()
-                    .padding(12.dp)
-            ) {
-                ChatPaneSection(
-                    messages = messages,
-                    selectedFile = selectedFile,
-                    onSendMessage = { viewModel.sendChatMessage(it) },
-                    onClearChat = { viewModel.clearChat() }
-                )
-            }
         } else {
             // Tablet/Phone compact: Show tabs to switch active views
             Column(modifier = Modifier.fillMaxSize()) {
@@ -183,8 +257,7 @@ fun IdeWorkspaceScreen(
                     selectedTabIndex = when (activeSubTab) {
                         "files" -> 0
                         "editor" -> 1
-                        "git" -> 2
-                        else -> 3
+                        else -> 2
                     },
                     containerColor = Color(0xFF15131A),
                     contentColor = MaterialTheme.colorScheme.primary
@@ -210,13 +283,6 @@ fun IdeWorkspaceScreen(
                         icon = { Icon(Icons.Rounded.AccountTree, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         modifier = Modifier.testTag("compact_tab_git")
                     )
-                    Tab(
-                        selected = activeSubTab == "chat",
-                        onClick = { activeSubTab = "chat" },
-                        text = { Text("Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                        icon = { Icon(Icons.Rounded.Chat, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                        modifier = Modifier.testTag("compact_tab_chat")
-                    )
                 }
 
                 Box(
@@ -236,7 +302,14 @@ fun IdeWorkspaceScreen(
                                 },
                                 onFileDelete = { viewModel.deleteFile(it) },
                                 onUploadClick = { filePickerLauncher.launch("*/*") },
-                                onNewFileCreate = { name, code -> viewModel.createFile(name, code) }
+                                onNewFileCreate = { name, code -> viewModel.createFile(name, code) },
+                                onOpenFolderClick = { folderPickerLauncher.launch(null) },
+                                isImportingFolder = isImportingFolder,
+                                folderImportStatus = folderImportStatus,
+                                rootFolderUri = rootFolderUri,
+                                rootFolderName = rootFolderName,
+                                onSyncClick = { viewModel.syncWorkspace() },
+                                onDisconnectClick = { viewModel.disconnectFolder() }
                             )
                         }
                         "editor" -> {
@@ -251,20 +324,15 @@ fun IdeWorkspaceScreen(
                             GithubIntegrationSection(
                                 repoName = repoName,
                                 codename = codename,
+                                remoteUrl = gitRemoteUrl,
                                 commits = commits,
                                 isSynced = isSynced,
                                 isSyncing = isSyncing,
-                                onSettingsUpdate = { repo, code -> viewModel.updateGitSettings(repo, code) },
+                                gitError = gitError,
+                                onSettingsUpdate = { repo, code, remote, token -> viewModel.updateGitSettings(repo, code, remote, token) },
                                 onCommit = { viewModel.commitChanges(it) },
-                                onPush = { viewModel.pushToGit() }
-                            )
-                        }
-                        "chat" -> {
-                            ChatPaneSection(
-                                messages = messages,
-                                selectedFile = selectedFile,
-                                onSendMessage = { viewModel.sendChatMessage(it) },
-                                onClearChat = { viewModel.clearChat() }
+                                onPush = { viewModel.pushToGit() },
+                                onRevert = { viewModel.revertToCheckpoint(it) }
                             )
                         }
                     }
@@ -282,7 +350,14 @@ fun FileBrowserSection(
     onFileSelect: (WorkspaceFile) -> Unit,
     onFileDelete: (WorkspaceFile) -> Unit,
     onUploadClick: () -> Unit,
-    onNewFileCreate: (String, String) -> Unit
+    onNewFileCreate: (String, String) -> Unit,
+    onOpenFolderClick: () -> Unit = {},
+    isImportingFolder: Boolean = false,
+    folderImportStatus: String = "",
+    rootFolderUri: String? = null,
+    rootFolderName: String? = null,
+    onSyncClick: () -> Unit = {},
+    onDisconnectClick: () -> Unit = {}
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
@@ -294,13 +369,70 @@ fun FileBrowserSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "WORKSPACE BROWSER",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
+            Column {
+                Text(
+                    text = "WORKSPACE BROWSER",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                if (rootFolderName != null) {
+                    Text(
+                        text = "Folder: $rootFolderName",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF4CAF50),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (rootFolderUri != null) {
+                    IconButton(
+                        onClick = onSyncClick,
+                        enabled = !isImportingFolder,
+                        modifier = Modifier.size(28.dp).testTag("sync_folder_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = "Sync Folder",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDisconnectClick,
+                        enabled = !isImportingFolder,
+                        modifier = Modifier.size(28.dp).testTag("disconnect_folder_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LinkOff,
+                            contentDescription = "Disconnect Folder",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onOpenFolderClick,
+                    enabled = !isImportingFolder,
+                    modifier = Modifier.size(28.dp).testTag("open_folder_button")
+                ) {
+                    if (isImportingFolder) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 1.5.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.FolderOpen,
+                            contentDescription = "Open Real Folder",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
                 IconButton(
                     onClick = onUploadClick,
                     modifier = Modifier.size(28.dp).testTag("upload_file_button")
@@ -324,6 +456,18 @@ fun FileBrowserSection(
                     )
                 }
             }
+        }
+
+        if (folderImportStatus.isNotEmpty()) {
+            Text(
+                text = folderImportStatus,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Gray,
+                fontSize = 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp)
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -370,7 +514,8 @@ fun FileBrowserSection(
                                 RoundedCornerShape(8.dp)
                             )
                             .clickable { onFileSelect(file) }
-                            .padding(10.dp),
+                            .padding(10.dp)
+                            .testTag("workspace_file_item_${file.id}"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -395,8 +540,32 @@ fun FileBrowserSection(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
+                            if (file.isConflict) {
+                                Surface(
+                                    color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.border(0.5.dp, Color(0xFFEF4444), RoundedCornerShape(4.dp))
+                                ) {
+                                    Text(
+                                        text = "CONFLICT",
+                                        color = Color(0xFFEF4444),
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            if (file.sourceUri != null) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Storage,
+                                    contentDescription = "Backed by a real file on disk",
+                                    tint = Color(0xFF4CAF50),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
                         }
                         IconButton(
                             onClick = { onFileDelete(file) },
@@ -469,17 +638,23 @@ fun FileBrowserSection(
 fun GithubIntegrationSection(
     repoName: String,
     codename: String,
+    remoteUrl: String,
     commits: List<GitCommit>,
     isSynced: Boolean,
     isSyncing: Boolean,
-    onSettingsUpdate: (String, String) -> Unit,
+    gitError: String?,
+    onSettingsUpdate: (String, String, String, String) -> Unit,
     onCommit: (String) -> Unit,
-    onPush: () -> Unit
+    onPush: () -> Unit,
+    onRevert: (GitCommit) -> Unit = {}
 ) {
     var editRepo by remember { mutableStateOf(repoName) }
     var editCode by remember { mutableStateOf(codename) }
+    var editRemoteUrl by remember(remoteUrl) { mutableStateOf(remoteUrl) }
+    var editToken by remember { mutableStateOf("") }
     var commitMsg by remember { mutableStateOf("") }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var pendingRevertCommit by remember { mutableStateOf<GitCommit?>(null) }
 
     Column(
         modifier = Modifier
@@ -487,6 +662,28 @@ fun GithubIntegrationSection(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (gitError != null) {
+            Surface(
+                color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = gitError,
+                        color = Color(0xFFEF4444),
+                        fontSize = 11.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
         // Top Repo status
         Card(
             colors = CardDefaults.cardColors(containerColor = Color(0xFF15131A)),
@@ -637,10 +834,49 @@ fun GithubIntegrationSection(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(
+                            onClick = { pendingRevertCommit = commit },
+                            modifier = Modifier.size(24.dp).testTag("revert_commit_${commit.commitHash}")
+                        ) {
+                            Icon(Icons.Rounded.History, contentDescription = "Revert to this checkpoint", tint = Color(0xFFFF9800), modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
             }
         }
+    }
+
+    pendingRevertCommit?.let { commit ->
+        AlertDialog(
+            onDismissRequest = { pendingRevertCommit = null },
+            title = { Text("Revert to Checkpoint?") },
+            text = {
+                Text(
+                    "This hard-resets the local repository to commit ${commit.commitHash.take(8)} " +
+                        "(\"${commit.message}\") and discards any uncommitted changes. Workspace files " +
+                        "will be restored to match that checkpoint. This cannot be undone.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRevert(commit)
+                        pendingRevertCommit = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
+                    modifier = Modifier.testTag("confirm_revert_button")
+                ) {
+                    Text("Revert", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRevertCommit = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showSettingsDialog) {
@@ -663,12 +899,29 @@ fun GithubIntegrationSection(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("git_repo_input")
                     )
+                    OutlinedTextField(
+                        value = editRemoteUrl,
+                        onValueChange = { editRemoteUrl = it },
+                        label = { Text("Remote URL") },
+                        placeholder = { Text("https://github.com/you/repo.git") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("git_remote_url_input")
+                    )
+                    OutlinedTextField(
+                        value = editToken,
+                        onValueChange = { editToken = it },
+                        label = { Text("Personal Access Token (leave blank to keep current)") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().testTag("git_token_input")
+                    )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        onSettingsUpdate(editRepo, editCode)
+                        onSettingsUpdate(editRepo, editCode, editRemoteUrl, editToken)
+                        editToken = ""
                         showSettingsDialog = false
                     },
                     modifier = Modifier.testTag("save_git_settings_button")
@@ -713,6 +966,7 @@ fun CodeEditorSection(
 
     val isRunning by viewModel.isSandboxRunning.collectAsState()
     val consoleOutput by viewModel.sandboxConsoleOutput.collectAsState()
+    val isHealing = isRunning && consoleOutput.contains("[SELF-HEAL]")
     val exitCode by viewModel.sandboxExitCode.collectAsState()
     val language by viewModel.sandboxLanguage.collectAsState()
     val memoryUsed by viewModel.sandboxMemoryUsed.collectAsState()
@@ -749,6 +1003,11 @@ fun CodeEditorSection(
                         color = if (isEdited) Color(0xFFFF9800) else Color(0xFF4CAF50)
                     )
                 }
+                Text(
+                    text = "AI-simulated output — no real compiler or interpreter runs",
+                    fontSize = 8.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -778,11 +1037,11 @@ fun CodeEditorSection(
                             strokeWidth = 1.5.dp
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Compiling...", fontSize = 10.sp)
+                        Text("AI Simulating...", fontSize = 10.sp)
                     } else {
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Compile & Run", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("AI Simulate Run", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -802,7 +1061,54 @@ fun CodeEditorSection(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        if (selectedFile.isConflict) {
+            Surface(
+                color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "Sync Conflict Detected!",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFEF4444)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "This file was modified on disk. Select which version to retain.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                viewModel.resolveConflict(selectedFile.id, textInput, keepLocal = true)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2C30)),
+                            modifier = Modifier.height(26.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Keep Editor", fontSize = 9.sp, color = Color.White)
+                        }
+                        Button(
+                            onClick = {
+                                val diskContent = selectedFile.conflictContent ?: selectedFile.content
+                                textInput = diskContent
+                                viewModel.resolveConflict(selectedFile.id, diskContent, keepLocal = false)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            modifier = Modifier.height(26.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Accept Disk", fontSize = 9.sp, color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
 
         // Monospace text field editor
         Box(
@@ -849,13 +1155,13 @@ fun CodeEditorSection(
                 Icon(
                     imageVector = Icons.Rounded.Terminal,
                     contentDescription = null,
-                    tint = if (isRunning) Color(0xFF4CAF50) else Color.Gray,
+                    tint = if (isHealing) Color(0xFFFF9800) else if (isRunning) Color(0xFF4CAF50) else Color.Gray,
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    text = "SANDBOX COMPILER & RUNNER CONSOLE",
+                    text = if (isHealing) "AI SELF-HEALING IN PROGRESS..." else if (isRunning) "SANDBOX COMPILER RUNNING..." else "SANDBOX COMPILER & RUNNER CONSOLE",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface,
+                    color = if (isHealing) Color(0xFFFF9800) else if (isRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -890,13 +1196,43 @@ fun CodeEditorSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = language.uppercase(),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = language.uppercase(),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        )
+                        
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        val isSelfHealEnabled by viewModel.isSelfHealingEnabled.collectAsState()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "SELF-HEAL",
+                                color = if (isSelfHealEnabled) Color(0xFF4ADE80) else Color.Gray,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Switch(
+                                checked = isSelfHealEnabled,
+                                onCheckedChange = { viewModel.setSelfHealingEnabled(it) },
+                                modifier = Modifier.scale(0.5f),
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                        }
+                    }
                     
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
@@ -954,190 +1290,6 @@ fun CodeEditorSection(
                             .verticalScroll(scrollState)
                     )
                 }
-            }
-        }
-    }
-}
-
-// Subcomponent: Swarm Chat Pane
-@Composable
-fun ChatPaneSection(
-    messages: List<ChatMessage>,
-    selectedFile: WorkspaceFile?,
-    onSendMessage: (String) -> Unit,
-    onClearChat: () -> Unit
-) {
-    var chatInput by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-
-    // Scroll to bottom on new messages
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            scope.launch {
-                listState.animateScrollToItem(messages.size - 1)
-            }
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                Text("SWARM INTELLIGENCE CHAT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            }
-            IconButton(onClick = onClearChat, modifier = Modifier.size(24.dp).testTag("clear_chat_button")) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Clear Chat", tint = Color.Gray, modifier = Modifier.size(16.dp))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Message List
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .background(Color(0xFF0F0E12), RoundedCornerShape(8.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E1B24)), RoundedCornerShape(8.dp))
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(messages) { message ->
-                val bubbleColor = when (message.role) {
-                    "user" -> Color(0xFF2C1C3F) // User dark indigo
-                    "system" -> Color(0xFF15131A) // System dark slate
-                    else -> {
-                        // Attempt to parse agent custom color or fallback to slate
-                        try {
-                            Color(android.graphics.Color.parseColor(message.colorHex)).copy(alpha = 0.15f)
-                        } catch (e: Exception) {
-                            Color(0xFF263238).copy(alpha = 0.2f)
-                        }
-                    }
-                }
-
-                val borderColor = when (message.role) {
-                    "user" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    "system" -> Color.Gray.copy(alpha = 0.2f)
-                    else -> {
-                        try {
-                            Color(android.graphics.Color.parseColor(message.colorHex)).copy(alpha = 0.4f)
-                        } catch (e: Exception) {
-                            Color.Transparent
-                        }
-                    }
-                }
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = if (message.role == "user") Alignment.End else Alignment.Start
-                ) {
-                    Text(
-                        text = message.sender.uppercase(),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
-                        color = if (message.role == "user") MaterialTheme.colorScheme.primary else {
-                            try {
-                                Color(android.graphics.Color.parseColor(message.colorHex))
-                            } catch (e: Exception) {
-                                Color.Gray
-                            }
-                        },
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .background(bubbleColor, RoundedCornerShape(8.dp))
-                            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(8.dp))
-                            .padding(10.dp)
-                    ) {
-                        Text(
-                            text = message.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontFamily = if (message.role == "system") FontFamily.Monospace else FontFamily.Default
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Quick Contextual action buttons to let Swarm interact with Editor context!
-        if (selectedFile != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Button(
-                    onClick = { onSendMessage("Explain the active file: ${selectedFile.filePath}") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1625)),
-                    border = BorderStroke(1.dp, Color(0xFF3B2F4E)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(28.dp)
-                        .testTag("quick_action_explain"),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Explain Code", fontSize = 9.sp, color = Color(0xFFECEFF1))
-                }
-                Button(
-                    onClick = { onSendMessage("Refactor or optimize this code to be cleaner and more performant: ${selectedFile.filePath}") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1625)),
-                    border = BorderStroke(1.dp, Color(0xFF3B2F4E)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(28.dp)
-                        .testTag("quick_action_optimize"),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Optimize Code", fontSize = 9.sp, color = Color(0xFFECEFF1))
-                }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-
-        // Send row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = chatInput,
-                onValueChange = { chatInput = it },
-                placeholder = { Text("Ask Swarm...", fontSize = 12.sp, color = Color.Gray) },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(50.dp)
-                    .testTag("chat_input_field"),
-                textStyle = MaterialTheme.typography.bodySmall,
-                singleLine = true
-            )
-            IconButton(
-                onClick = {
-                    if (chatInput.isNotBlank()) {
-                        onSendMessage(chatInput)
-                        chatInput = ""
-                    }
-                },
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-                    .testTag("send_chat_button")
-            ) {
-                Icon(Icons.Rounded.Send, contentDescription = "Send", tint = Color.White)
             }
         }
     }

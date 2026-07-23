@@ -7,32 +7,30 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.SwarmConfig
 import com.example.viewmodel.SwarmViewModel
 
+/**
+ * Administrative home for everything that isn't the live Session surface: swarm/agent/node
+ * analytics and CRUD, plus MCP/Skills management. Mirrors the internal-TabRow pattern
+ * UnifiedWorkspaceScreen already established.
+ */
 @Composable
-fun UnifiedWorkspaceScreen(
+fun ManageScreen(
     viewModel: SwarmViewModel,
-    initialSwarm: SwarmConfig?,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    val tabTitles = listOf("Agent Console & Logs", "Code Editor & Explorer")
+    val tabTitles = listOf("Dashboard", "Agents", "Nodes", "MCP & Skills")
     val tabIcons = listOf(
-        Icons.Rounded.Terminal,
-        Icons.Rounded.Code
+        Icons.Rounded.Dashboard,
+        Icons.Rounded.SmartToy,
+        Icons.Rounded.Hub,
+        Icons.Rounded.Extension
     )
-
-    LaunchedEffect(initialSwarm) {
-        if (initialSwarm != null) {
-            selectedTab = 0
-        }
-    }
 
     Column(
         modifier = modifier
@@ -49,7 +47,7 @@ fun UnifiedWorkspaceScreen(
                 Tab(
                     selected = selectedTab == index,
                     onClick = { selectedTab = index },
-                    modifier = Modifier.testTag("workspace_tab_$index").height(56.dp),
+                    modifier = Modifier.testTag("manage_tab_$index").height(56.dp),
                     icon = {
                         Icon(
                             imageVector = tabIcons[index],
@@ -74,8 +72,16 @@ fun UnifiedWorkspaceScreen(
                 .weight(1f)
         ) {
             when (selectedTab) {
-                0 -> TaskDetailScreen(viewModel = viewModel, initialSwarm = initialSwarm)
-                1 -> IdeWorkspaceScreen(viewModel = viewModel)
+                0 -> DashboardScreen(
+                    viewModel = viewModel,
+                    onNavigateToSwarm = { swarm ->
+                        viewModel.selectSessionSwarmConfig(swarm)
+                        viewModel.requestTabSwitch("session")
+                    }
+                )
+                1 -> AgentScreen(viewModel = viewModel)
+                2 -> NodeScreen(viewModel = viewModel)
+                3 -> McpSkillsScreen(viewModel = viewModel)
             }
         }
     }

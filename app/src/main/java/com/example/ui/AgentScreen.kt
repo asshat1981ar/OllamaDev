@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +30,10 @@ import androidx.compose.ui.unit.sp
 import com.example.data.Agent
 import com.example.viewmodel.SwarmViewModel
 
+private val OLLAMA_MODEL_PRESETS = listOf(
+    "llama3", "llama3.1", "mistral", "phi3", "codellama", "gemma2", "qwen2.5", "deepseek-coder"
+)
+
 @Composable
 fun AgentScreen(
     viewModel: SwarmViewModel,
@@ -43,6 +48,7 @@ fun AgentScreen(
     var modelInput by remember { mutableStateOf("llama3:8b") }
     var promptInput by remember { mutableStateOf("") }
     var colorInput by remember { mutableStateOf("#9C27B0") }
+    var showValidationError by remember { mutableStateOf(false) }
 
     val roles = listOf("Researcher", "Programmer", "Critic", "Executive", "Writer", "Analyst")
     val colors = listOf("#3F51B5", "#4CAF50", "#E91E63", "#FF9800", "#9C27B0", "#00B4D8", "#FF5722")
@@ -55,7 +61,8 @@ fun AgentScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .testTag("agent_list"),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 80.dp)
         ) {
@@ -134,12 +141,15 @@ fun AgentScreen(
 
         if (showAddDialog) {
             AlertDialog(
-                onDismissRequest = { showAddDialog = false },
+                onDismissRequest = {
+                    showAddDialog = false
+                    showValidationError = false
+                },
                 title = { Text("Assemble Swarm Agent") },
                 text = {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp).testTag("agent_dialog_fields")
                     ) {
                         item {
                             OutlinedTextField(
@@ -165,6 +175,7 @@ fun AgentScreen(
                                         modifier = Modifier
                                             .clickable { roleInput = r }
                                             .border(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF2C2C30), RoundedCornerShape(4.dp))
+                                            .testTag("agent_role_chip_${r}")
                                     ) {
                                         Text(
                                             text = r,
@@ -188,7 +199,7 @@ fun AgentScreen(
                         }
                         
                         item {
-                            Text("Ollama Cloud Base Model presets:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("Ollama Base Model presets:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -196,8 +207,7 @@ fun AgentScreen(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                val presets = listOf("llama3:8b", "mistral:7b", "phi3", "gemma2:9b", "qwen2:7b", "codegemma:7b", "codellama:7b")
-                                presets.forEach { model ->
+                                OLLAMA_MODEL_PRESETS.forEach { model ->
                                     val isSelected = modelInput == model
                                     Surface(
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
@@ -205,6 +215,7 @@ fun AgentScreen(
                                         modifier = Modifier
                                             .clickable { modelInput = model }
                                             .border(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF2C2C30), RoundedCornerShape(4.dp))
+                                            .testTag("agent_model_preset_${model}")
                                     ) {
                                         Text(
                                             text = model,
@@ -247,8 +258,20 @@ fun AgentScreen(
                                                 shape = CircleShape
                                             )
                                             .clickable { colorInput = c }
+                                            .testTag("agent_color_${c}")
                                     )
                                 }
+                            }
+                        }
+
+                        if (showValidationError) {
+                            item {
+                                Text(
+                                    text = "Agent name and system prompt are required.",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.testTag("agent_validation_error")
+                                )
                             }
                         }
                     }
@@ -260,7 +283,10 @@ fun AgentScreen(
                                 viewModel.addAgent(nameInput, roleInput, modelInput, promptInput, colorInput)
                                 nameInput = ""
                                 promptInput = ""
+                                showValidationError = false
                                 showAddDialog = false
+                            } else {
+                                showValidationError = true
                             }
                         },
                         modifier = Modifier.testTag("submit_agent_button")
@@ -269,7 +295,10 @@ fun AgentScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAddDialog = false }) {
+                    TextButton(onClick = {
+                        showAddDialog = false
+                        showValidationError = false
+                    }) {
                         Text("Cancel")
                     }
                 }
@@ -316,7 +345,7 @@ fun AgentCard(
                         val icon = when (agent.role.lowercase()) {
                             "researcher" -> Icons.Rounded.Search
                             "programmer" -> Icons.Rounded.Terminal
-                            "critic" -> Icons.Rounded.Grading
+                            "critic" -> Icons.AutoMirrored.Rounded.Grading
                             "executive" -> Icons.Rounded.CheckCircle
                             else -> Icons.Rounded.SmartToy
                         }
