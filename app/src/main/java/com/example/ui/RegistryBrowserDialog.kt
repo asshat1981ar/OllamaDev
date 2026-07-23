@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,11 +101,14 @@ fun RegistryBrowserDialog(
                     onValueChange = { query = it },
                     label = { Text("Search servers") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("registry_search_input"),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { viewModel.searchRegistry(query) }),
                     trailingIcon = {
-                        IconButton(onClick = { viewModel.searchRegistry(query) }) {
+                        IconButton(
+                            onClick = { viewModel.searchRegistry(query) },
+                            modifier = Modifier.testTag("registry_search_button")
+                        ) {
                             Icon(Icons.Rounded.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -170,7 +174,8 @@ fun RegistryBrowserDialog(
                                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                     Button(
                                         onClick = { viewModel.searchRegistry(query, append = true) },
-                                        enabled = !isLoading
+                                        enabled = !isLoading,
+                                        modifier = Modifier.testTag("registry_load_more_button")
                                     ) {
                                         if (isLoading) {
                                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -318,7 +323,7 @@ private fun RegistryServerCard(
                 Button(
                     onClick = onInstall,
                     enabled = streamableUrl != null && !isInstalling,
-                    modifier = Modifier.height(32.dp),
+                    modifier = Modifier.height(32.dp).testTag("registry_install_button_${server.name}"),
                     contentPadding = PaddingValues(horizontal = 12.dp)
                 ) {
                     if (isInstalling) {

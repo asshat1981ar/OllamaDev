@@ -46,10 +46,43 @@ data class OllamaResponse(
     val response: String? = null
 )
 
-object OllamaService {
+@JsonClass(generateAdapter = true)
+data class OllamaStreamChunk(
+    val response: String? = null,
+    val done: Boolean = false
+)
+
+interface OllamaService {
+    suspend fun generate(
+        nodeUrl: String,
+        modelName: String,
+        prompt: String,
+        systemPrompt: String? = null,
+        apiKey: String? = null
+    ): String?
+
+    /**
+     * Streaming variant of [generate]: invokes [onToken] with the *cumulative* text generated so
+     * far each time a new NDJSON chunk arrives, and returns the full text once the model reports
+     * done. Returns null on any transport failure, same as [generate].
+     */
+    suspend fun generateStreaming(
+        nodeUrl: String,
+        modelName: String,
+        prompt: String,
+        systemPrompt: String? = null,
+        apiKey: String? = null,
+        onToken: suspend (partial: String) -> Unit
+    ): String?
+
+    suspend fun pingAndFetchModels(nodeUrl: String, apiKey: String? = null): Pair<Boolean, List<String>>
+}
+
+object OllamaServiceDefault : OllamaService {
     private val moshi = Moshi.Builder().build()
     private val jsonAdapter = moshi.adapter(OllamaRequest::class.java)
     private val responseAdapter = moshi.adapter(OllamaResponse::class.java)
+    private val streamChunkAdapter = moshi.adapter(OllamaStreamChunk::class.java)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -57,12 +90,12 @@ object OllamaService {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    suspend fun generate(
+    override suspend fun generate(
         nodeUrl: String,
         modelName: String,
         prompt: String,
-        systemPrompt: String? = null,
-        apiKey: String? = null
+        systemPrompt: String?,
+        apiKey: String?
     ): String? = withContext(Dispatchers.IO) {
         val cleanUrl = if (nodeUrl.endsWith("/")) nodeUrl else "$nodeUrl/"
         val apiUrl = "${cleanUrl}api/generate"
@@ -104,9 +137,67 @@ object OllamaService {
         }
     }
 
+    override suspend fun generateStreaming(
+        nodeUrl: String,
+        modelName: String,
+        prompt: String,
+        systemPrompt: String?,
+        apiKey: String?,
+        onToken: suspend (String) -> Unit
+    ): String? = withContext(Dispatchers.IO) {
+        val cleanUrl = if (nodeUrl.endsWith("/")) nodeUrl else "$nodeUrl/"
+        val apiUrl = "${cleanUrl}api/generate"
+        val cleanModel = modelName.substringAfter("ollama/")
+
+        val requestBodyObj = OllamaRequest(
+            model = cleanModel,
+            prompt = prompt,
+            system = systemPrompt,
+            stream = true
+        )
+
+        try {
+            val jsonString = jsonAdapter.toJson(requestBodyObj)
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val body = jsonString.toRequestBody(mediaType)
+
+            val requestBuilder = Request.Builder()
+                .url(apiUrl)
+                .post(body)
+            if (!apiKey.isNullOrBlank()) {
+                requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+            }
+
+            client.newCall(requestBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.e("OllamaService", "Error response: ${response.code}")
+                    return@withContext null
+                }
+                val source = response.body?.source() ?: return@withContext null
+                val accumulator = StringBuilder()
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    if (line.isBlank()) continue
+                    val chunk = try {
+                        streamChunkAdapter.fromJson(line)
+                    } catch (e: Exception) {
+                        null
+                    } ?: continue
+                    chunk.response?.let { accumulator.append(it) }
+                    onToken(accumulator.toString())
+                    if (chunk.done) break
+                }
+                accumulator.toString()
+            }
+        } catch (e: Exception) {
+            Log.e("OllamaService", "Ollama streaming failed: ${e.localizedMessage}")
+            null
+        }
+    }
+
     private val tagsResponseAdapter = moshi.adapter(OllamaTagsResponse::class.java)
 
-    suspend fun pingAndFetchModels(nodeUrl: String, apiKey: String? = null): Pair<Boolean, List<String>> = withContext(Dispatchers.IO) {
+    override suspend fun pingAndFetchModels(nodeUrl: String, apiKey: String?): Pair<Boolean, List<String>> = withContext(Dispatchers.IO) {
         val cleanUrl = if (nodeUrl.endsWith("/")) nodeUrl else "$nodeUrl/"
         val apiUrl = "${cleanUrl}api/tags"
 
@@ -139,4 +230,3 @@ data class OllamaTagModel(val name: String)
 
 @JsonClass(generateAdapter = true)
 data class OllamaTagsResponse(val models: List<OllamaTagModel>)
-

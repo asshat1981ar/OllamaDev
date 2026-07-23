@@ -19,7 +19,7 @@ data class Agent(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
     val role: String, // Researcher, Programmer, Critic, Executive, Writer, etc.
-    val modelName: String, // e.g., llama3:8b, mistral:7b, phi3, gemini-3.5-flash
+    val modelName: String, // e.g., llama3:8b, mistral:7b, phi3
     val systemPrompt: String,
     val colorHex: String, // Hex color code for agent's theme
     val isSystemTemplate: Boolean = false
@@ -85,7 +85,8 @@ data class GitCommit(
     val commitHash: String,
     val author: String,
     val message: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val taskId: Int? = null // links an agentic-loop checkpoint/commit back to the SwarmTask that created it
 )
 
 @Entity(tableName = "mcp_servers")

@@ -60,6 +60,26 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+kotlin {
+  compilerOptions {
+    freeCompilerArgs.add("-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi")
+  }
+}
+
+tasks.withType<Test> {
+  // Robolectric loads the full android-all jar per test class; on this device's limited
+  // RAM the test executor was getting OOM-killed with the JVM-default heap. Bound it
+  // explicitly and recycle the worker periodically to release accumulated native memory.
+  maxHeapSize = "1536m"
+  jvmArgs("-XX:MaxMetaspaceSize=384m", "-XX:+UseSerialGC")
+  maxParallelForks = 1
+  // 1: a test class whose Robolectric sandbox gets corrupted (e.g. a hung/leaked thread
+  // from an infinite-recomposition test) otherwise takes down every class that shares its
+  // worker JVM afterward. Isolating per-class costs startup time but keeps one bad class
+  // from masking results for the rest of the suite.
+  forkEvery = 1
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
@@ -96,7 +116,6 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
@@ -115,7 +134,6 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
   implementation(libs.jgit)
   implementation(libs.androidx.security.crypto)
   coreLibraryDesugaring(libs.desugar.jdk.libs)

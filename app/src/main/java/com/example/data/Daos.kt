@@ -134,6 +134,11 @@ interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC")
     fun getAllMessages(): Flow<List<ChatMessage>>
 
+    // Most-recent-first, capped at :limit -- used to build a bounded context window of prior
+    // turns for Session's REPL-style memory (see SwarmViewModel.runSwarmFromSession).
+    @Query("SELECT * FROM chat_messages ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentMessagesSync(limit: Int): List<ChatMessage>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: ChatMessage): Long
 

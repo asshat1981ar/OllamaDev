@@ -20,21 +20,21 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         McpToolEntity::class,
         ClaudeSkill::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
-abstract class AppDatabase : RoomDatabase() {
-    abstract fun ollamaNodeDao(): OllamaNodeDao
-    abstract fun agentDao(): AgentDao
-    abstract fun swarmConfigDao(): SwarmConfigDao
-    abstract fun swarmTaskDao(): SwarmTaskDao
-    abstract fun taskStepDao(): TaskStepDao
-    abstract fun workspaceFileDao(): WorkspaceFileDao
-    abstract fun chatMessageDao(): ChatMessageDao
-    abstract fun gitCommitDao(): GitCommitDao
-    abstract fun mcpServerDao(): McpServerDao
-    abstract fun mcpToolDao(): McpToolDao
-    abstract fun claudeSkillDao(): ClaudeSkillDao
+abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
+    abstract override fun ollamaNodeDao(): OllamaNodeDao
+    abstract override fun agentDao(): AgentDao
+    abstract override fun swarmConfigDao(): SwarmConfigDao
+    abstract override fun swarmTaskDao(): SwarmTaskDao
+    abstract override fun taskStepDao(): TaskStepDao
+    abstract override fun workspaceFileDao(): WorkspaceFileDao
+    abstract override fun chatMessageDao(): ChatMessageDao
+    abstract override fun gitCommitDao(): GitCommitDao
+    abstract override fun mcpServerDao(): McpServerDao
+    abstract override fun mcpToolDao(): McpToolDao
+    abstract override fun claudeSkillDao(): ClaudeSkillDao
 
     companion object {
         @Volatile
@@ -52,6 +52,20 @@ abstract class AppDatabase : RoomDatabase() {
                 .build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        /**
+         * Resets the singleton instance and deletes the underlying database file(s).
+         * The next call to [getDatabase] will create a fresh database and re-run seeders.
+         * Intended for test isolation.
+         */
+        fun reset(context: Context) {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
+                val dbName = "ollama_swarm_database"
+                context.deleteDatabase(dbName)
             }
         }
     }
@@ -82,7 +96,8 @@ abstract class AppDatabase : RoomDatabase() {
                 (2, 'Feature Implementation Swarm', 'Core Architect defines API contracts, Byte Code implements code, and Bug Hunter writes unit/integration tests to ensure full coverage.', 'PEER_TO_PEER', '4,2,5'),
                 (3, 'SecOps Build & Release Swarm', 'Byte Code edits files, Shield Guard performs security audits, and Pipeline Deployer runs the CI build and stages deployment configurations.', 'SEQUENTIAL', '2,6,7'),
                 (4, 'Full Auto-SDLC Swarm', 'An end-to-end SDLC pipeline: Spec Architect designs, Core Architect structures, Byte Code implements, Bug Hunter tests, Shield Guard audits, and Pipeline Deployer builds.', 'SEQUENTIAL', '1,4,2,5,6,7'),
-                (5, 'Adaptive Dynamic Routing Swarm', 'Orchestrator analyzes requirements at runtime, selects the optimal agents, builds a dynamic routing path, and synthesizes the final outputs.', 'DYNAMIC_ROUTING', '1,4,2,3,5')
+                (5, 'Adaptive Dynamic Routing Swarm', 'Orchestrator analyzes requirements at runtime, selects the optimal agents, builds a dynamic routing path, and synthesizes the final outputs.', 'DYNAMIC_ROUTING', '1,4,2,3,5'),
+                (6, 'Autonomous Coding Harness', 'A Replit-Agent/Manus-AI-style autonomous plan-act-verify loop: Core Architect plans and assigns roles, Byte Code implements each step, and Bug Hunter verifies every step (invoking real MCP tooling when available) before checkpointing progress.', 'AGENTIC_LOOP', '4,2,5')
                 """.trimIndent()
             )
 

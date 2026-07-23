@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -40,6 +41,7 @@ fun NodeScreen(
     var urlInput by remember { mutableStateOf("http://") }
     var modelsInput by remember { mutableStateOf("llama3, mistral") }
     var apiKeyInput by remember { mutableStateOf("") }
+    var showValidationError by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -49,7 +51,8 @@ fun NodeScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .testTag("node_list"),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 80.dp)
         ) {
@@ -133,10 +136,16 @@ fun NodeScreen(
 
         if (showAddDialog) {
             AlertDialog(
-                onDismissRequest = { showAddDialog = false },
+                onDismissRequest = {
+                    showAddDialog = false
+                    showValidationError = false
+                },
                 title = { Text("Register Swarm Node") },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
                         OutlinedTextField(
                             value = nameInput,
                             onValueChange = { nameInput = it },
@@ -166,6 +175,14 @@ fun NodeScreen(
                             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth().testTag("node_api_key_input")
                         )
+                        if (showValidationError) {
+                            Text(
+                                text = "Node name and URL are required.",
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 12.sp,
+                                modifier = Modifier.testTag("node_validation_error")
+                            )
+                        }
                     }
                 },
                 confirmButton = {
@@ -177,7 +194,10 @@ fun NodeScreen(
                                 urlInput = "http://"
                                 modelsInput = "llama3, mistral"
                                 apiKeyInput = ""
+                                showValidationError = false
                                 showAddDialog = false
+                            } else {
+                                showValidationError = true
                             }
                         },
                         modifier = Modifier.testTag("submit_node_button")
@@ -186,7 +206,10 @@ fun NodeScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAddDialog = false }) {
+                    TextButton(onClick = {
+                        showAddDialog = false
+                        showValidationError = false
+                    }) {
                         Text("Cancel")
                     }
                 }

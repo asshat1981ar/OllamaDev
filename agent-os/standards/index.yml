@@ -1,0 +1,39 @@
+# Agent OS Standards Index
+
+backend:
+  swarm-engine-llm-pool:
+    description: Single Ollama-node-pool entry point for all LLM calls, no cloud fallback
+
+data:
+  interface-seam:
+    description: Testable interface seam over I/O classes with default-arg injection
+  secure-prefs:
+    description: Secrets go through EncryptedSharedPreferences, never plain Room/SharedPreferences
+
+git:
+  mirror-before-commit:
+    description: Sync WorkspaceFile rows into GitService's real workDir before any git op
+  pat-https-push:
+    description: Git push authenticates via PAT-over-HTTPS only, no SSH support
+
+mcp:
+  dual-response-parsing:
+    description: MCP calls must go through buildRequest()/parseResponse() for JSON-or-SSE handling
+  registry-type-inference:
+    description: Registry server type is guessed by keyword matching, extend the when-branches
+  remote-only-transport:
+    description: McpClient only supports remote Streamable-HTTP servers, no local stdio
+
+state:
+  sharing-started-strategy:
+    description: "StateFlow SharingStarted choice: WhileSubscribed for DB, Eagerly for singletons"
+  singleton-store-for-cross-cutting-state:
+    description: Use a singleton object + MutableStateFlow for state written by non-ViewModel classes
+  viewmodel-toast-feedback:
+    description: One-off UI feedback via direct Toast from ViewModel, no event bus
+
+testing:
+  screenshot-testing:
+    description: Headless Roborazzi screenshot tests via Robolectric, no emulator needed
+  spike-test-convention:
+    description: Throwaway <Library>SpikeTest.kt to de-risk new third-party libraries before wrapping

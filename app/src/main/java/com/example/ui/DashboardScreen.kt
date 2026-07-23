@@ -346,10 +346,10 @@ fun SwarmActiveGraph(agents: List<Agent>, isExecuting: Boolean) {
             
             val displayAgents = agents.take(4).ifEmpty {
                 listOf(
-                    Agent(name = "Researcher", role = "Researcher", modelName = "gemini", systemPrompt = "", colorHex = "#3F51B5"),
+                    Agent(name = "Researcher", role = "Researcher", modelName = "llama3", systemPrompt = "", colorHex = "#3F51B5"),
                     Agent(name = "Programmer", role = "Programmer", modelName = "llama3", systemPrompt = "", colorHex = "#4CAF50"),
                     Agent(name = "Critic", role = "Critic", modelName = "mistral", systemPrompt = "", colorHex = "#E91E63"),
-                    Agent(name = "Executive", role = "Executive", modelName = "gemini", systemPrompt = "", colorHex = "#FF9800")
+                    Agent(name = "Executive", role = "Executive", modelName = "mistral", systemPrompt = "", colorHex = "#FF9800")
                 )
             }
 
@@ -583,7 +583,7 @@ fun NodesStatusSection(nodes: List<OllamaNode>, onRefresh: () -> Unit) {
                 )
                 IconButton(
                     onClick = onRefresh,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(24.dp).testTag("refresh_nodes_button")
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Refresh,
@@ -658,7 +658,9 @@ fun NodeMiniRow(node: OllamaNode) {
                 color = statusColor,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                modifier = Modifier
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .testTag("node_status_${node.id}")
             )
         }
     }

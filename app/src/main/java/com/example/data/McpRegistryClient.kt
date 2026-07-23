@@ -96,7 +96,7 @@ data class RegistryOfficialMeta(
  * Read-only client for the official MCP Registry (https://registry.modelcontextprotocol.io).
  * Supports listing/searching servers and fetching server details.
  */
-class McpRegistryClient {
+class McpRegistryClient : McpRegistryClientInterface {
     private val moshi = Moshi.Builder().build()
     private val listAdapter = moshi.adapter(RegistryServerList::class.java)
     private val detailAdapter = moshi.adapter(RegistryServerEntry::class.java)
@@ -108,10 +108,10 @@ class McpRegistryClient {
         .build()
 
     /** Searches the registry. Returns the page and the next cursor (if any). */
-    suspend fun searchServers(
-        query: String = "",
-        limit: Int = 30,
-        cursor: String? = null
+    override suspend fun searchServers(
+        query: String,
+        limit: Int,
+        cursor: String?
     ): Result<Pair<List<RegistryServerDetail>, String?>> = withContext(Dispatchers.IO) {
         try {
             val params = buildList {
@@ -148,7 +148,7 @@ class McpRegistryClient {
     }
 
     /** Fetches the latest version details for a server by its fully-qualified name. */
-    suspend fun getServerDetail(serverName: String): Result<RegistryServerDetail> = withContext(Dispatchers.IO) {
+    override suspend fun getServerDetail(serverName: String): Result<RegistryServerDetail> = withContext(Dispatchers.IO) {
         try {
             val encodedName = URLEncoder.encode(serverName, "UTF-8")
             val url = "$REGISTRY_BASE_URL/v0.1/servers/$encodedName/versions/latest"

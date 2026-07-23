@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.*
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -36,12 +37,19 @@ data class VoiceAction(
     val agentModel: String? = null
 )
 
-class SwarmViewModel(application: Application) : AndroidViewModel(application) {
-    private val db = AppDatabase.getDatabase(application)
-    private val mcpClient = McpClient()
+class SwarmViewModel(
+    application: Application,
+    private val ollamaService: OllamaService = OllamaServiceDefault,
+    private val mcpClient: McpClientInterface = McpClient(),
+    private val registryClient: McpRegistryClientInterface = McpRegistryClient(),
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    database: AppDatabaseInterface = AppDatabase.getDatabase(application),
+    private val securePrefs: SecurePrefsInterface = RealSecurePrefs(application)
+) : AndroidViewModel(application) {
+    private val db = database
     // Deferred: references gitService/gitWorkDir declared further down, which are themselves
     // `by lazy` -- deferring this avoids reading them before their own initializers have run.
-    private val swarmEngine by lazy { SwarmEngine(db, gitService, mcpClient, getApplication()) }
+    private val swarmEngine by lazy { SwarmEngine(db, gitService, mcpClient, getApplication(), securePrefs, ollamaService, dispatcher) }
     private val moshi = Moshi.Builder().build()
 
     private val prefs = application.getSharedPreferences("ollama_swarm_prefs", Context.MODE_PRIVATE)
@@ -187,7 +195,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             
             nodes.forEach { node ->
                 val startTime = System.currentTimeMillis()
-                val (isOnline, fetchedModels) = OllamaService.pingAndFetchModels(node.url, resolveApiKeyForNode(node))
+                val (isOnline, fetchedModels) = ollamaService.pingAndFetchModels(node.url, resolveApiKeyForNode(node))
                 val duration = (System.currentTimeMillis() - startTime).toInt()
                 
                 val status = if (isOnline) "Online" else "Offline"
@@ -213,7 +221,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             db.ollamaNodeDao().updateNode(node.copy(status = "Connecting"))
             val startTime = System.currentTimeMillis()
-            val (isOnline, fetchedModels) = OllamaService.pingAndFetchModels(node.url)
+            val (isOnline, fetchedModels) = ollamaService.pingAndFetchModels(node.url)
             val duration = (System.currentTimeMillis() - startTime).toInt()
             
             val status = if (isOnline) "Online" else "Offline"
@@ -238,8 +246,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     private val _mcpError = MutableStateFlow<String?>(null)
     val mcpError: StateFlow<String?> = _mcpError.asStateFlow()
 
-    // MCP Registry integration
-    private val registryClient = McpRegistryClient()
+    // MCP Registry integration (injected via constructor)
 
     private val _registryResults = MutableStateFlow<List<RegistryServerDetail>>(emptyList())
     val registryResults: StateFlow<List<RegistryServerDetail>> = _registryResults.asStateFlow()
@@ -254,7 +261,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     val registryError: StateFlow<String?> = _registryError.asStateFlow()
 
     private suspend fun connectMcpServer(serverId: Int, sourceUrl: String, type: String, authToken: String?) {
-        val initResult = withContext(Dispatchers.IO) { mcpClient.initialize(sourceUrl, authToken) }
+        val initResult = withContext(dispatcher) { mcpClient.initialize(sourceUrl, authToken) }
         val session = initResult.getOrNull()
         if (session == null) {
             db.mcpServerDao().getServerById(serverId)?.let {
@@ -264,7 +271,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val toolsResult = withContext(Dispatchers.IO) { mcpClient.listTools(sourceUrl, session, authToken) }
+        val toolsResult = withContext(dispatcher) { mcpClient.listTools(sourceUrl, session, authToken) }
         val server = db.mcpServerDao().getServerById(serverId) ?: return
         if (toolsResult.isSuccess) {
             val tools = toolsResult.getOrNull().orEmpty()
@@ -358,7 +365,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 )
             ).toInt()
             if (authToken.isNotBlank()) {
-                SecurePrefs.setMcpToken(getApplication(), id, authToken)
+                securePrefs.setMcpToken(id, authToken)
             }
             connectMcpServer(id, sourceUrl, type, authToken.ifBlank { null })
         }
@@ -375,7 +382,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             db.mcpToolDao().deleteToolsForServer(server.id)
             db.claudeSkillDao().deleteAutoGeneratedSkillsByServerType(server.type)
             db.mcpServerDao().deleteServer(server)
-            SecurePrefs.clearMcpToken(getApplication(), server.id)
+            securePrefs.clearMcpToken(server.id)
             // Disable any remaining skills related to deleted server type
             db.claudeSkillDao().updateRecommendationByServerType(server.type, false)
             db.claudeSkillDao().setSkillEnabledByServerType(server.type, false)
@@ -393,7 +400,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 _mcpError.value = null
                 db.mcpServerDao().updateServer(server.copy(status = "Connecting"))
-                val authToken = SecurePrefs.getMcpToken(getApplication(), server.id)
+                val authToken = securePrefs.getMcpToken(server.id)
                 connectMcpServer(server.id, server.sourceUrl, server.type, authToken)
             }
         }
@@ -471,7 +478,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 )
             ).toInt()
             if (authToken.isNotBlank()) {
-                SecurePrefs.setMcpToken(getApplication(), id, authToken)
+                securePrefs.setMcpToken(id, authToken)
             }
             connectMcpServer(id, sourceUrl, serverType, authToken.ifBlank { null })
         }
@@ -546,8 +553,70 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
     fun runSwarm(config: SwarmConfig, prompt: String) {
         viewModelScope.launch {
             _isExecutingTask.value = true
-            val taskId = swarmEngine.executeTask(config, prompt)
-            _selectedTaskId.value = taskId
+            swarmEngine.executeTask(config, prompt, onTaskCreated = { id -> _selectedTaskId.value = id })
+            _isExecutingTask.value = false
+        }
+    }
+
+    // Session (REPL/Manus-style) dispatch: which swarm a Session prompt targets when the user
+    // hasn't explicitly picked one, plus the running conversation memory that makes consecutive
+    // Session prompts feel like one continuous exchange instead of isolated one-shot tasks.
+    private val _selectedSessionSwarmConfig = MutableStateFlow<SwarmConfig?>(null)
+    val selectedSessionSwarmConfig: StateFlow<SwarmConfig?> = _selectedSessionSwarmConfig.asStateFlow()
+    fun selectSessionSwarmConfig(config: SwarmConfig?) {
+        _selectedSessionSwarmConfig.value = config
+    }
+
+    private val _sessionInputHistory = MutableStateFlow<List<String>>(emptyList())
+    val sessionInputHistory: StateFlow<List<String>> = _sessionInputHistory.asStateFlow()
+
+    // Phone-layout toggle for Session's "computer panel" bottom sheet (file/editor/git context).
+    private val _isComputerPanelExpanded = MutableStateFlow(false)
+    val isComputerPanelExpanded: StateFlow<Boolean> = _isComputerPanelExpanded.asStateFlow()
+    fun setComputerPanelExpanded(expanded: Boolean) {
+        _isComputerPanelExpanded.value = expanded
+    }
+
+    // Lets a screen nested under Manage (e.g. Dashboard's "open this swarm") request that
+    // MainActivity switch its top-level tab back to Session, without threading a callback
+    // through the intermediate ManageScreen layer.
+    private val _requestedTab = MutableStateFlow<String?>(null)
+    val requestedTab: StateFlow<String?> = _requestedTab.asStateFlow()
+    fun requestTabSwitch(tab: String) {
+        _requestedTab.value = tab
+    }
+    fun clearRequestedTabSwitch() {
+        _requestedTab.value = null
+    }
+
+    private val maxSessionContextChars = 4000
+
+    fun runSwarmFromSession(prompt: String) {
+        val config = _selectedSessionSwarmConfig.value ?: allSwarmConfigs.value.firstOrNull() ?: return
+        viewModelScope.launch {
+            _isExecutingTask.value = true
+            _sessionInputHistory.value = (_sessionInputHistory.value + prompt).takeLast(50)
+
+            val recentMessages = db.chatMessageDao().getRecentMessagesSync(20).sortedBy { it.timestamp }
+            val contextPrefix = recentMessages
+                .joinToString("\n") { "${it.sender}: ${it.message}" }
+                .takeLast(maxSessionContextChars)
+
+            db.chatMessageDao().insertMessage(
+                ChatMessage(sender = "You", role = "user", message = prompt, timestamp = System.currentTimeMillis())
+            )
+
+            val taskId = swarmEngine.executeTask(
+                config, prompt,
+                contextPrefix = contextPrefix,
+                onTaskCreated = { id -> _selectedTaskId.value = id }
+            )
+
+            val result = db.swarmTaskDao().getTaskById(taskId)?.result.orEmpty()
+            db.chatMessageDao().insertMessage(
+                ChatMessage(sender = config.name, role = "assistant", message = result, timestamp = System.currentTimeMillis())
+            )
+
             _isExecutingTask.value = false
         }
     }
@@ -582,7 +651,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                // Call Gemini to classify spoken transcript and format as structured JSON
+                // Classify spoken transcript and format as structured JSON
                 val apiPrompt = """
                     Analyze the following user voice command: "$spoken"
                     We can perform these actions in our on-device Ollama Swarm app:
@@ -606,7 +675,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 """.trimIndent()
 
-                val responseJson = GeminiService.generate(apiPrompt, "You are a voice command router. Always respond with raw JSON matching the requested schema and nothing else.")
+                val responseJson = swarmEngine.generateFreeform(apiPrompt, "You are a voice command router. Always respond with raw JSON matching the requested schema and nothing else.")
                 
                 // Parse the response using Moshi
                 val cleanedJson = responseJson.trim()
@@ -615,7 +684,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                     .trim()
                 
                 val adapter = moshi.adapter(VoiceAction::class.java)
-                val voiceAction = withContext(Dispatchers.IO) {
+                val voiceAction = withContext(dispatcher) {
                     adapter.fromJson(cleanedJson)
                 }
 
@@ -764,14 +833,14 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             if (uriStr != null) {
                 val app = getApplication<Application>()
                 val treeUri = Uri.parse(uriStr)
-                val root = withContext(Dispatchers.IO) { DocumentFile.fromTreeUri(app, treeUri) }
+                val root = withContext(dispatcher) { DocumentFile.fromTreeUri(app, treeUri) }
                 if (root != null && root.isDirectory) {
-                    val realDoc = withContext(Dispatchers.IO) {
+                    val realDoc = withContext(dispatcher) {
                         findOrCreateFileInTree(root, cleanPath)
                     }
                     if (realDoc != null) {
                         sourceUriStr = realDoc.uri.toString()
-                        withContext(Dispatchers.IO) {
+                        withContext(dispatcher) {
                             try {
                                 app.contentResolver.openOutputStream(realDoc.uri, "wt")
                                     ?.use { it.write(finalContent.toByteArray()) }
@@ -800,7 +869,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         val existing = db.workspaceFileDao().getFileById(id) ?: return null
         val updated = existing.copy(content = content, lastModified = System.currentTimeMillis())
         existing.sourceUri?.let { uriString ->
-            withContext(Dispatchers.IO) {
+            withContext(dispatcher) {
                 try {
                     getApplication<Application>().contentResolver
                         .openOutputStream(Uri.parse(uriString), "wt")
@@ -833,7 +902,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             )
             if (keepLocal) {
                 resolved.sourceUri?.let { uriString ->
-                    withContext(Dispatchers.IO) {
+                    withContext(dispatcher) {
                         try {
                             getApplication<Application>().contentResolver
                                 .openOutputStream(Uri.parse(uriString), "wt")
@@ -853,7 +922,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             db.workspaceFileDao().deleteFile(file)
             file.sourceUri?.let { uriStr ->
-                withContext(Dispatchers.IO) {
+                withContext(dispatcher) {
                     try {
                         val fileDoc = DocumentFile.fromSingleUri(getApplication(), Uri.parse(uriStr))
                         if (fileDoc != null && fileDoc.exists()) {
@@ -895,7 +964,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                         android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
 
-                val root = withContext(Dispatchers.IO) { DocumentFile.fromTreeUri(app, treeUri) }
+                val root = withContext(dispatcher) { DocumentFile.fromTreeUri(app, treeUri) }
                 if (root == null || !root.isDirectory) {
                     _folderImportStatus.value = "Could not open selected folder."
                     return@launch
@@ -915,7 +984,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
 
                 var imported = 0
                 val maxFiles = 1500
-                val hitCap = withContext(Dispatchers.IO) {
+                val hitCap = withContext(dispatcher) {
                     walkAndImport(root, maxFiles = maxFiles) { relativePath, doc ->
                         val text = try {
                             app.contentResolver.openInputStream(doc.uri)
@@ -978,7 +1047,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val root = withContext(Dispatchers.IO) { DocumentFile.fromTreeUri(app, treeUri) }
+                val root = withContext(dispatcher) { DocumentFile.fromTreeUri(app, treeUri) }
                 if (root == null || !root.isDirectory) {
                     _folderImportStatus.value = "Could not open workspace folder."
                     _isImportingFolder.value = false
@@ -989,7 +1058,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 val maxFiles = 1500
                 var hitCap = false
 
-                withContext(Dispatchers.IO) {
+                withContext(dispatcher) {
                     suspend fun walk(node: DocumentFile, base: String) {
                         if (diskFiles.size >= maxFiles) {
                             hitCap = true
@@ -1029,7 +1098,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 for ((relativePath, doc) in diskFiles) {
                     val existing = dbFiles[relativePath]
                     if (existing == null) {
-                        val text = withContext(Dispatchers.IO) {
+                        val text = withContext(dispatcher) {
                             try {
                                 app.contentResolver.openInputStream(doc.uri)
                                     ?.bufferedReader()?.use { it.readText() }
@@ -1047,7 +1116,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                         added++
                     } else {
                         if (doc.lastModified() > existing.lastModified) {
-                            val text = withContext(Dispatchers.IO) {
+                            val text = withContext(dispatcher) {
                                 try {
                                     app.contentResolver.openInputStream(doc.uri)
                                         ?.bufferedReader()?.use { it.readText() }
@@ -1186,7 +1255,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         _gitRemoteUrl.value = remoteUrl
         prefs.edit().putString("git_remote_url", remoteUrl).apply()
         if (token.isNotBlank()) {
-            SecurePrefs.setGitToken(getApplication(), token)
+            securePrefs.setGitToken(token)
         }
     }
 
@@ -1194,7 +1263,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _gitError.value = null
             val files = db.workspaceFileDao().getAllFiles().first()
-            val (result, status) = withContext(Dispatchers.IO) {
+            val (result, status) = withContext(dispatcher) {
                 gitService.mirrorFiles(files)
                 gitService.commitAll("Lead Swarm Orchestrator", "orchestrator@ollamadev.local", message)
             }
@@ -1207,7 +1276,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                         timestamp = result.timestamp
                     )
                 )
-                withContext(Dispatchers.IO) { computeGitSyncState() }
+                withContext(dispatcher) { computeGitSyncState() }
             } else if (status is GitOpResult.Failure) {
                 _gitError.value = status.error
             }
@@ -1216,7 +1285,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pushToGit() {
         val remoteUrl = _gitRemoteUrl.value
-        val token = SecurePrefs.getGitToken(getApplication())
+        val token = securePrefs.getGitToken()
         if (remoteUrl.isBlank() || token.isNullOrBlank()) {
             _gitError.value = "Configure a remote URL and personal access token in Git Settings before pushing."
             return
@@ -1225,12 +1294,12 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
             _gitError.value = null
             _isGitSyncing.value = true
             try {
-                val status = withContext(Dispatchers.IO) { gitService.push(remoteUrl, token) }
+                val status = withContext(dispatcher) { gitService.push(remoteUrl, token) }
                 when (status) {
                     is GitOpResult.Success -> {
-                        val headHash = withContext(Dispatchers.IO) { gitService.localHeadHash() }
+                        val headHash = withContext(dispatcher) { gitService.localHeadHash() }
                         prefs.edit().putString("git_last_pushed_hash", headHash).apply()
-                        withContext(Dispatchers.IO) { computeGitSyncState() }
+                        withContext(dispatcher) { computeGitSyncState() }
                     }
                     is GitOpResult.Failure -> _gitError.value = status.error
                 }
@@ -1240,101 +1309,6 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun clearChat() {
-        viewModelScope.launch {
-            db.chatMessageDao().clearChat()
-            // insert initial greeting
-            db.chatMessageDao().insertMessage(
-                ChatMessage(
-                    sender = "System",
-                    role = "system",
-                    message = "Decentralized Swarm Chat channel cleared.",
-                    timestamp = System.currentTimeMillis(),
-                    colorHex = "#9E9E9E"
-                )
-            )
-        }
-    }
-
-    fun sendChatMessage(text: String, replyWithAgent: Boolean = true) {
-        viewModelScope.launch {
-            if (text.isBlank()) return@launch
-
-            // 1. Save user message
-            db.chatMessageDao().insertMessage(
-                ChatMessage(
-                    sender = "User",
-                    role = "user",
-                    message = text,
-                    timestamp = System.currentTimeMillis()
-                )
-            )
-
-            if (!replyWithAgent) return@launch
-
-            // 2. Select active agent to respond
-            val agentsList = db.agentDao().getAllAgents().stateIn(viewModelScope).value
-            if (agentsList.isEmpty()) return@launch
-
-            // Use Byte Code (Programmer) if "code", "file", "python" is mentioned, else Apex Researcher
-            val selectedAgent = if (text.lowercase().contains("code") || text.lowercase().contains("file") || text.lowercase().contains("python") || text.lowercase().contains("refactor")) {
-                agentsList.find { it.role.lowercase().contains("programmer") } ?: agentsList.first()
-            } else {
-                agentsList.find { it.role.lowercase().contains("researcher") } ?: agentsList.first()
-            }
-
-            // Set active in metrics store
-            AgentStateStore.setAgentActive(selectedAgent.id, true, "Synthesizing Reply")
-
-            // Simulate typing delay
-            delay(1200)
-
-            // Construct system instruction with workspace files context!
-            val filesList = db.workspaceFileDao().getAllFiles().stateIn(viewModelScope).value
-            val filesContext = if (filesList.isNotEmpty()) {
-                "The current workspace contains the following files:\n" + filesList.joinToString("\n\n") { file ->
-                    "File: ${file.filePath}\nContent:\n${file.content}"
-                }
-            } else {
-                "The workspace is currently empty."
-            }
-
-            val systemInstruction = """
-                ${selectedAgent.systemPrompt}
-                
-                You are interacting in a workspace chat where you can see the files.
-                Here is the current workspace files state for context:
-                $filesContext
-                
-                Keep your answer extremely concise, functional, and professional.
-            """.trimIndent()
-
-            try {
-                val reply = GeminiService.generate(text, systemInstruction)
-                db.chatMessageDao().insertMessage(
-                    ChatMessage(
-                        sender = selectedAgent.name,
-                        role = "agent",
-                        message = reply,
-                        timestamp = System.currentTimeMillis(),
-                        colorHex = selectedAgent.colorHex
-                    )
-                )
-            } catch (e: Exception) {
-                db.chatMessageDao().insertMessage(
-                    ChatMessage(
-                        sender = selectedAgent.name,
-                        role = "agent",
-                        message = "I encountered an error while synthesizing: ${e.localizedMessage}",
-                        timestamp = System.currentTimeMillis(),
-                        colorHex = selectedAgent.colorHex
-                    )
-                )
-            } finally {
-                AgentStateStore.setAgentActive(selectedAgent.id, false, "Idle")
-            }
-        }
-    }
 
     // Sandbox Compilation & Code Runner states
     private val _isSandboxRunning = MutableStateFlow(false)
@@ -1373,6 +1347,48 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun declineSelfHealingPatch() {
         selfHealingDeferred?.complete(false)
+    }
+
+    // Agentic-loop human oversight: SwarmEngine (a plain class with no reference back into this
+    // ViewModel's private state) publishes gate requests through the process-wide
+    // PendingApprovalStore singleton; these just re-expose/delegate to it, same rationale as
+    // AgentStateStore's agentStates re-export above.
+    val pendingApproval: StateFlow<PendingApproval?> = PendingApprovalStore.pendingApproval
+    fun approvePendingAction() = PendingApprovalStore.approve()
+    fun rejectPendingAction() = PendingApprovalStore.reject()
+
+    val pendingFileChange: StateFlow<PendingFileChange?> = PendingApprovalStore.pendingFileChange
+    fun acceptPendingFileChange() = PendingApprovalStore.acceptFileChange()
+    fun rejectPendingFileChange() = PendingApprovalStore.rejectFileChange()
+
+    /**
+     * Hard-reverts the local git repo to [commit] and reconciles WorkspaceFile rows against the
+     * reverted-to filesystem state -- deletes rows no longer present on disk, upserts the rest.
+     * Local, destructive (discards uncommitted changes), so this is user-initiated only from the
+     * commit history UI, gated by a plain confirmation dialog rather than PendingApprovalStore
+     * (that gate is specifically for agent-initiated risky actions).
+     */
+    fun revertToCheckpoint(commit: GitCommit) {
+        viewModelScope.launch(dispatcher) {
+            val status = withContext(Dispatchers.IO) { gitService.revertToCommit(commit.commitHash) }
+            if (status is GitOpResult.Success) {
+                val diskFiles = withContext(Dispatchers.IO) { gitService.readWorkDirFiles() }
+                val diskPaths = diskFiles.map { it.first }.toSet()
+                val currentFiles = db.workspaceFileDao().getAllFiles().first()
+                currentFiles.filter { it.filePath !in diskPaths }.forEach { db.workspaceFileDao().deleteFile(it) }
+                diskFiles.forEach { (path, content) ->
+                    val existing = db.workspaceFileDao().getFileByPath(path)
+                    if (existing != null) {
+                        db.workspaceFileDao().updateFile(existing.copy(content = content, lastModified = System.currentTimeMillis()))
+                    } else {
+                        db.workspaceFileDao().insertFile(WorkspaceFile(filePath = path, content = content))
+                    }
+                }
+                Toast.makeText(getApplication(), "Reverted to checkpoint ${commit.commitHash}", Toast.LENGTH_SHORT).show()
+            } else if (status is GitOpResult.Failure) {
+                Toast.makeText(getApplication(), "Revert failed: ${status.error}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     fun runSandbox(file: WorkspaceFile) {
@@ -1428,7 +1444,7 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     _sandboxConsoleOutput.value += "[COMPILER] Linking libraries and starting sandbox runner...\n"
                     val systemInstruction = "You are a sandboxed terminal interpreter. Output the exact execution logs of the code provided."
-                    val output = GeminiService.generate(prompt, systemInstruction)
+                    val output = swarmEngine.generateFreeform(prompt, systemInstruction)
                     
                     delay(800)
                     _sandboxConsoleOutput.value += "\n--- VIRTUAL RUNTIME OUTPUT ---\n"
@@ -1468,8 +1484,8 @@ class SwarmViewModel(application: Application) : AndroidViewModel(application) {
                             
                             _sandboxConsoleOutput.value += "[SELF-HEAL] Dispatching repair prompt to ${bugHunterAgent?.name ?: "Bug Hunter"}...\n"
                             
-                            val fixedContentRaw = GeminiService.generate(
-                                repairPrompt, 
+                            val fixedContentRaw = swarmEngine.generateFreeform(
+                                repairPrompt,
                                 bugHunterAgent?.systemPrompt ?: "You are a software bug hunting agent. Correct code syntax and logic errors."
                             )
                             

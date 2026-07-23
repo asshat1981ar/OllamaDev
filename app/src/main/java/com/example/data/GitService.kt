@@ -142,4 +142,39 @@ class GitService(private val workDir: File) {
             null
         }
     }
+
+    /** Hard-resets [workDir] to [commitHash], discarding any uncommitted changes -- a local,
+     *  destructive rollback. Callers must reconcile WorkspaceFile rows against [readWorkDirFiles]
+     *  afterward, since this only touches the real filesystem mirror, not the Room-backed rows. */
+    fun revertToCommit(commitHash: String): GitOpResult {
+        if (!hasRepo()) return GitOpResult.Failure("No local repository to revert.")
+        return try {
+            openOrInitGit().use { git ->
+                git.reset().setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD).setRef(commitHash).call()
+                GitOpResult.Success("Reverted to $commitHash")
+            }
+        } catch (e: Exception) {
+            GitOpResult.Failure(e.localizedMessage ?: "Unknown revert error")
+        }
+    }
+
+    /** Walks [workDir] (excluding `.git`) and returns every file as a relative-path/content pair,
+     *  mirroring [mirrorFiles]'s path convention in reverse -- used after [revertToCommit] to
+     *  reconcile WorkspaceFile rows with the reverted-to filesystem state. */
+    fun readWorkDirFiles(): List<Pair<String, String>> {
+        val results = mutableListOf<Pair<String, String>>()
+        fun walk(dir: File, base: String) {
+            dir.listFiles()?.forEach { child ->
+                if (base.isEmpty() && child.name == ".git") return@forEach
+                val relPath = if (base.isEmpty()) child.name else "$base/${child.name}"
+                if (child.isDirectory) {
+                    walk(child, relPath)
+                } else {
+                    results += relPath to child.readText()
+                }
+            }
+        }
+        walk(workDir, "")
+        return results
+    }
 }

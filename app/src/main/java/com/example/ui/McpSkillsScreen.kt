@@ -222,7 +222,8 @@ fun McpSkillsScreen(
                                 FilterChip(
                                     selected = serverType == type,
                                     onClick = { serverType = type },
-                                    label = { Text(type, fontSize = 11.sp) }
+                                    label = { Text(type, fontSize = 11.sp) },
+                                    modifier = Modifier.testTag("mcp_server_type_chip_${type}")
                                 )
                             }
                         }
@@ -549,7 +550,7 @@ fun McpServersSection(
                                         contentColor = if (isConnected) Color(0xFFE91E63) else Color(0xFF4CAF50)
                                     ),
                                     border = BorderStroke(1.dp, if (isConnected) Color(0xFFE91E63) else Color(0xFF4CAF50)),
-                                    modifier = Modifier.height(26.dp),
+                                    modifier = Modifier.height(26.dp).testTag("connect_server_button_${server.id}"),
                                     contentPadding = PaddingValues(horizontal = 8.dp)
                                 ) {
                                     if (isConnecting) {

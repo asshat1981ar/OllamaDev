@@ -29,7 +29,7 @@ data class McpTool(
  * HTTP(S). Handles both a single application/json response and a text/event-stream response
  * (reads until the SSE event carrying the matching JSON-RPC response id arrives).
  */
-class McpClient {
+class McpClient : McpClientInterface {
     private val moshi = Moshi.Builder().build()
     private val jsonObjectType = Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
     private val jsonObjectAdapter = moshi.adapter<Map<String, Any?>>(jsonObjectType)
@@ -94,7 +94,7 @@ class McpClient {
         return jsonObjectAdapter.fromJson(text) ?: throw IllegalStateException("Invalid JSON-RPC response")
     }
 
-    fun toJsonString(value: Map<String, Any?>?): String? {
+    override fun toJsonString(value: Map<String, Any?>?): String? {
         return value?.let { jsonObjectAdapter.toJson(it) }
     }
 
@@ -104,7 +104,7 @@ class McpClient {
         return error["message"] as? String ?: "Unknown MCP error"
     }
 
-    suspend fun initialize(serverUrl: String, authToken: String?): Result<McpSession> =
+    override suspend fun initialize(serverUrl: String, authToken: String?): Result<McpSession> =
         withContext(Dispatchers.IO) {
             try {
                 val requestId = idCounter.getAndIncrement()
@@ -133,7 +133,7 @@ class McpClient {
             }
         }
 
-    suspend fun notifyInitialized(serverUrl: String, session: McpSession, authToken: String?) {
+    override suspend fun notifyInitialized(serverUrl: String, session: McpSession, authToken: String?) {
         withContext(Dispatchers.IO) {
             try {
                 val request = buildRequest(serverUrl, "notifications/initialized", null, session, authToken, null)
@@ -144,7 +144,7 @@ class McpClient {
         }
     }
 
-    suspend fun listTools(serverUrl: String, session: McpSession, authToken: String?): Result<List<McpTool>> =
+    override suspend fun listTools(serverUrl: String, session: McpSession, authToken: String?): Result<List<McpTool>> =
         withContext(Dispatchers.IO) {
             try {
                 val requestId = idCounter.getAndIncrement()
@@ -179,7 +179,7 @@ class McpClient {
             }
         }
 
-    suspend fun callTool(
+    override suspend fun callTool(
         serverUrl: String,
         session: McpSession,
         authToken: String?,
