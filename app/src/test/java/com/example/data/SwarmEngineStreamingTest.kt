@@ -89,8 +89,15 @@ class SwarmEngineStreamingTest {
             insertsForTask.size > 1
         )
 
-        val lengths = insertsForTask.map { it.content.length }
-        assertEquals("Content length should grow monotonically as tokens stream in", lengths, lengths.sorted())
+        // The first write is the THINKING placeholder ("Analyzing prompt and building execution
+        // context...", ~50 chars), which is legitimately LONGER than the first streamed token chunk.
+        // Monotonic growth only holds for the streamed content that replaces it, so assert on the
+        // sequence after dropping the leading placeholder write.
+        val streamedLengths = insertsForTask.drop(1).map { it.content.length }
+        assertEquals(
+            "Streamed content length should grow monotonically as tokens arrive",
+            streamedLengths, streamedLengths.sorted()
+        )
 
         val finalContent = insertsForTask.last().content
         assertTrue(finalContent.contains("[FakeOllama] llama3 says:"))
