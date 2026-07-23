@@ -208,10 +208,15 @@ class AgenticActionExecutor(
             return Result.failure(IllegalStateException(message))
         }
 
-        if (isRiskyMcpCall(toolEntity, skill)) {
+        // Compute the reason string up front so the approval dialog can show *why* the call
+        // was gated (annotation-based vs keyword-based) instead of just the raw argsJson. The
+        // string is null when the call isn't risky; otherwise it explains the matched reason.
+        val riskReason = isRiskyMcpCallReason(toolEntity, skill)
+        if (riskReason != null) {
             val approved = PendingApprovalStore.requestApproval(
                 taskId, agentName, ApprovalRiskCategory.MCP_DESTRUCTIVE_CALL,
-                "Call '${skill.name}' ($toolName) on ${server.name}", detail = argsJson
+                "Call '${skill.name}' ($toolName) on ${server.name}",
+                detail = "$riskReason\n\nArgs: $argsJson"
             )
             if (!approved) {
                 val message = "$agentName's call to '${skill.name}' ($toolName) was declined by user."
@@ -258,13 +263,18 @@ class AgenticActionExecutor(
     /** MCP's standard `destructiveHint`/`readOnlyHint` tool annotations, when a live server
      *  provides them, take priority; otherwise fall back to keyword inference over the skill/tool
      *  name+description -- same precedent as [com.example.data.inferServerType]'s registry
-     *  keyword matching, since no seeded/example server here has real annotations yet. */
-    private fun isRiskyMcpCall(toolEntity: McpToolEntity?, skill: ClaudeSkill): Boolean {
+     *  keyword matching, since no seeded/example server here has real annotations yet.
+     *  Returns a human-readable reason string when the call is risky (so the approval dialog
+     *  can show *why* the call was flagged), or null when the call is not risky. */
+    private fun isRiskyMcpCallReason(toolEntity: McpToolEntity?, skill: ClaudeSkill): String? {
         val annotations = toolEntity?.annotationsJson?.let { parseJsonArguments(it) }
-        (annotations?.get("destructiveHint") as? Boolean)?.let { if (it) return true }
-        (annotations?.get("readOnlyHint") as? Boolean)?.let { if (it) return false }
+        (annotations?.get("destructiveHint") as? Boolean)?.let { if (it) return "Flagged by tool: destructiveHint=true" }
+        (annotations?.get("readOnlyHint") as? Boolean)?.let { if (it) return null }
         val text = "${skill.name} ${skill.description} ${toolEntity?.name.orEmpty()}".lowercase()
-        return listOf("delete", "remove", "drop", "push", "deploy", "destroy", "force", "publish", "merge").any(text::contains)
+        val matchedKeyword = listOf("delete", "remove", "drop", "push", "deploy", "destroy", "force", "publish", "merge")
+            .firstOrNull(text::contains)
+            ?: return null
+        return "Flagged by keyword: contains '$matchedKeyword'"
     }
 
     /**
