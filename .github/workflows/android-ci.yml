@@ -1,0 +1,61 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same branch when a new commit lands. Saves runner minutes
+# when an author pushes followup commits to a PR before the previous run finishes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The project's gradle-wrapper.properties pins gradle-9.3.1-bin.zip, so actions/setup-java
+      # only needs to install the JDK the wrapper runs on. JDK 17 matches the project's expected
+      # toolchain; the wrapper would also accept 21. JDK 17 is the conservative default that
+      # matches what Android Studio Iguana+ uses for AGP 9.x projects.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Pre-cache the Gradle distribution and the project's incremental-build caches under
+      # ~/.gradle. Cache key excludes AGP/Kotlin plugin versions from the gradle-deps bucket
+      # because those rarely change; the wrapper-version key covers the distribution itself.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      # Single canonical validation: full unit test suite. The project gates on this; if it
+      # breaks, no PR merges. -Pci=true isn't set because the project doesn't ship a CI flag
+      # in gradle.properties; forkEvery and heap bounds come from the project's own build.gradle.kts.
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      # Upload the JUnit HTML + XML reports so failures are inspectable from the Actions UI
+      # without re-running locally. Always run, even on failure (if: always()), so a red test
+      # still surfaces the report.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          retention-days: 14
+          if-no-files-found: warn
