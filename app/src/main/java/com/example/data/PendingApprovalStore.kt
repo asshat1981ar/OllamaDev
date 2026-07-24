@@ -28,10 +28,10 @@ data class PendingFileChange(
 
 /**
  * Singleton bridge letting [SwarmEngine] (a plain class instantiated inside
- * SwarmViewModel, with no reference back into ViewModel-owned state) publish a
- * human-approval-gate request and suspend until SwarmViewModel/UI resolves it --
- * same rationale as [AgentStateStore]. Two independent gates (risky-action approval,
- * file-change diff review) since their payload shapes differ meaningfully.
+ *  SwarmViewModel, with no reference back into ViewModel-owned state) publish a
+ *  human-approval-gate request and suspend until SwarmViewModel/UI resolves it --
+ *  same rationale as [AgentStateStore]. Two independent gates (risky-action approval,
+ *  file-change diff review) since their payload shapes differ meaningfully.
  */
 object PendingApprovalStore {
     private val idCounter = AtomicLong(0)
@@ -86,6 +86,31 @@ object PendingApprovalStore {
         fileChangeDeferred?.complete(false)
     }
 
+    // Batch API for multiple file changes
+    private val _pendingFileChangeBatch = MutableStateFlow<List<PendingFileChange>?>(null)
+    val pendingFileChangeBatch: StateFlow<List<PendingFileChange>?> = _pendingFileChangeBatch.asStateFlow()
+    private var fileChangeBatchDeferred: CompletableDeferred<List<Boolean>>? = null
+
+    suspend fun requestFileChangeReviewBatch(changes: List<PendingFileChange>): List<Boolean> {
+        val deferred = CompletableDeferred<List<Boolean>>()
+        fileChangeBatchDeferred = deferred
+        _pendingFileChangeBatch.value = changes
+        val result = deferred.await()
+        _pendingFileChangeBatch.value = null
+        fileChangeBatchDeferred = null
+        return result
+    }
+
+    fun acceptAllFileChanges() {
+        val changes = _pendingFileChangeBatch.value ?: emptyList()
+        fileChangeBatchDeferred?.complete(List(changes.size) { true })
+    }
+
+    fun rejectAllFileChanges() {
+        val changes = _pendingFileChangeBatch.value ?: emptyList()
+        fileChangeBatchDeferred?.complete(List(changes.size) { false })
+    }
+
     /**
      * Resets both gates. This is a process-wide singleton (unlike per-instance
      * ViewModel state), so tests must call this to avoid leaking pending state or a
@@ -96,5 +121,8 @@ object PendingApprovalStore {
         _pendingApproval.value = null
         fileChangeDeferred = null
         _pendingFileChange.value = null
+        // Clear batch state
+        fileChangeBatchDeferred = null
+        _pendingFileChangeBatch.value = null
     }
 }
