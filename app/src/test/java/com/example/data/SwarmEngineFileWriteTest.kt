@@ -5,6 +5,7 @@ import com.example.ui.FakeAppDatabase
 import com.example.ui.FakeMcpClient
 import com.example.ui.FakeSecurePrefs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -152,5 +153,38 @@ class SwarmEngineFileWriteTest {
         val steps = db.taskStepDao().getStepsForTaskSync(taskId!!)
         assertTrue(steps.any { it.actionType == "FILE_CHANGE_REJECTED" })
         assertTrue(steps.none { it.actionType == "FILE_CHANGE_APPLIED" })
+    }
+    @Test
+    fun requestFileChangeReviewBatch_approved_returnsListOfApprovalResults() = runTest(UnconfinedTestDispatcher()) {
+        PendingApprovalStore.reset()
+
+        val change1 = PendingFileChange(
+            taskId = 1,
+            agentName = "Agent1",
+            filePath = "file1.txt",
+            originalContent = "original1",
+            proposedContent = "proposed1",
+            isNewFile = false
+        )
+        val change2 = PendingFileChange(
+            taskId = 1,
+            agentName = "Agent1",
+            filePath = "file2.txt",
+            originalContent = "original2",
+            proposedContent = "proposed2",
+            isNewFile = true
+        )
+
+        val requestJob = launch {
+            // Wait until the batch is published, then approve all changes.
+            PendingApprovalStore.pendingFileChangeBatch.first { it != null }
+            PendingApprovalStore.acceptAllFileChanges()
+        }
+
+        val results = PendingApprovalStore.requestFileChangeReviewBatch(listOf(change1, change2))
+        requestJob.join()
+
+        assertEquals(2, results.size)
+        assertTrue("Expected all batch changes to be approved", results.all { it })
     }
 }
