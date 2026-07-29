@@ -18,9 +18,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GitCommit::class,
         McpServer::class,
         McpToolEntity::class,
-        ClaudeSkill::class
+        ClaudeSkill::class,
+        SprintCycle::class,
+        SprintArtifact::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
@@ -35,10 +37,47 @@ abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
     abstract override fun mcpServerDao(): McpServerDao
     abstract override fun mcpToolDao(): McpToolDao
     abstract override fun claudeSkillDao(): ClaudeSkillDao
+    abstract override fun sprintCycleDao(): SprintCycleDao
+    abstract override fun sprintArtifactDao(): SprintArtifactDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS sprint_cycles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        goal TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        currentPhase TEXT NOT NULL,
+                        startedAt INTEGER NOT NULL,
+                        completedAt INTEGER,
+                        unresolvedCount INTEGER NOT NULL,
+                        reimplCount INTEGER NOT NULL,
+                        seedContext TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS sprint_artifacts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        cycleId INTEGER NOT NULL,
+                        phase TEXT NOT NULL,
+                        taskId INTEGER NOT NULL,
+                        artifactPath TEXT NOT NULL,
+                        distilledSummary TEXT NOT NULL,
+                        unresolvedItems TEXT NOT NULL,
+                        gitCommitHash TEXT,
+                        completedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -48,6 +87,7 @@ abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
                     "ollama_swarm_database"
                 )
                 .fallbackToDestructiveMigration(true)
+                .addMigrations(MIGRATION_13_14)
                 .addCallback(DatabaseSeederCallback())
                 .build()
                 INSTANCE = instance
@@ -146,7 +186,8 @@ abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
                 (2, 'SearXNG Search Bridge', 'Search', 'http://localhost:3002/mcp', 'Disconnected', 0, '{}'),
                 (3, 'Private GitHub MCP', 'GitHub', 'http://localhost:3003/mcp', 'Disconnected', 0, '{"repo":"owner/repo"}'),
                 (4, 'Workspace Postgres', 'Database', 'http://localhost:3004/mcp', 'Disconnected', 0, '{"connectionString":"postgresql://localhost:5432/app"}'),
-                (5, 'Browser Automation', 'Browser', 'http://localhost:3005/mcp', 'Disconnected', 0, '{"headless":true}')
+                (5, 'Browser Automation', 'Browser', 'http://localhost:3005/mcp', 'Disconnected', 0, '{"headless":true}'),
+                (6, 'OllamaDev Sandbox', 'Sandbox', 'http://localhost:5000/mcp', 'Disconnected', 0, '{}')
                 """.trimIndent()
             )
 
@@ -165,7 +206,9 @@ abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
                 (7, 'Git Branch Creator', 'Create and check out new local Git branches for code tasks.', 'Development', 1, 1, 'git branch feature/auth-fix', 'None', NULL),
                 (8, 'Git Auto-Stager & Committer', 'Stage modified files and write clean conventional commits automatically.', 'Development', 1, 1, 'git commit -am "feat: add user authentication tokens"', 'None', NULL),
                 (9, 'Automated Compiler Self-Healer', 'Verify Kotlin compilation and run auto-repair loops on code errors.', 'Automation', 1, 1, 'Check kotlin compilation syntax and run healing loop', 'None', NULL),
-                (10, 'Gradle Test Runner', 'Run local Gradle test tasks and parse trace reports.', 'Automation', 1, 1, 'gradle test :app', 'None', NULL)
+                (10, 'Gradle Test Runner', 'Run local Gradle test tasks and parse trace reports.', 'Automation', 1, 1, 'gradle test :app', 'None', NULL),
+                (11, 'Pytest Sandbox Runner', 'Run pytest in the workspace and return structured pass/fail output.', 'Automation', 1, 0, 'MCP_CALL: run_pytest | {"path": "tests"}', 'Sandbox', 'run_pytest'),
+                (12, 'Gradle Sandbox Runner', 'Run the real Gradle unit-test command via the OllamaDev sandbox MCP server.', 'Automation', 1, 0, 'MCP_CALL: run_gradle_test_command | {"test_filter": "com.example.SprintOrchestratorTest"}', 'Sandbox', 'run_gradle_test_command')
                 """.trimIndent()
             )
         }
