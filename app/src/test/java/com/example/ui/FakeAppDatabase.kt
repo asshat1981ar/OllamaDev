@@ -15,6 +15,10 @@ import com.example.data.McpToolDao
 import com.example.data.McpToolEntity
 import com.example.data.OllamaNode
 import com.example.data.OllamaNodeDao
+import com.example.data.SprintArtifact
+import com.example.data.SprintArtifactDao
+import com.example.data.SprintCycle
+import com.example.data.SprintCycleDao
 import com.example.data.SwarmConfig
 import com.example.data.SwarmConfigDao
 import com.example.data.SwarmTask
@@ -216,6 +220,27 @@ private class FakeClaudeSkillDao(seed: List<ClaudeSkill>) : ClaudeSkillDao {
     override suspend fun clearAllSkills() = store.clear()
 }
 
+private class FakeSprintCycleDao : SprintCycleDao {
+    private val store = InMemoryStore<SprintCycle>(emptyList(), { it.id }, { item, id -> item.copy(id = id) })
+    override fun getAllCycles(): Flow<List<SprintCycle>> = store.flow()
+    override fun getActiveCycle(): Flow<SprintCycle?> =
+        store.flow().map { list -> list.filter { it.status == "RUNNING" || it.status == "PAUSED" }.maxByOrNull { it.startedAt } }
+    override suspend fun getCycleById(id: Int): SprintCycle? = store.snapshot().find { it.id == id }
+    override suspend fun insertCycle(cycle: SprintCycle): Long = store.insertOrReplace(cycle)
+    override suspend fun updateCycle(cycle: SprintCycle) = store.updateIfExists(cycle)
+}
+
+private class FakeSprintArtifactDao : SprintArtifactDao {
+    private val store = InMemoryStore<SprintArtifact>(emptyList(), { it.id }, { item, id -> item.copy(id = id) })
+    override fun getArtifactsForCycle(cycleId: Int): Flow<List<SprintArtifact>> =
+        store.flow().map { list -> list.filter { it.cycleId == cycleId }.sortedBy { it.completedAt } }
+    override suspend fun getArtifactsForCycleSync(cycleId: Int): List<SprintArtifact> =
+        store.snapshot().filter { it.cycleId == cycleId }.sortedBy { it.completedAt }
+    override suspend fun getLatestArtifactForPhase(cycleId: Int, phase: String): SprintArtifact? =
+        store.snapshot().filter { it.cycleId == cycleId && it.phase == phase }.maxByOrNull { it.completedAt }
+    override suspend fun insertArtifact(artifact: SprintArtifact): Long = store.insertOrReplace(artifact)
+}
+
 // Seed data ported verbatim from AppDatabase.DatabaseSeederCallback's raw SQL, so tests that
 // assert against seeded names (e.g. "SDLC Spec & Design Swarm", "Local Node (Loopback)") keep
 // working unchanged. swarm_tasks/task_steps/git_commits/mcp_tools start empty, matching production.
@@ -283,7 +308,8 @@ private fun seedMcpServers() = listOf(
     McpServer(id = 2, name = "SearXNG Search Bridge", type = "Search", sourceUrl = "http://localhost:3002/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{}"),
     McpServer(id = 3, name = "Private GitHub MCP", type = "GitHub", sourceUrl = "http://localhost:3003/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"repo\":\"owner/repo\"}"),
     McpServer(id = 4, name = "Workspace Postgres", type = "Database", sourceUrl = "http://localhost:3004/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"connectionString\":\"postgresql://localhost:5432/app\"}"),
-    McpServer(id = 5, name = "Browser Automation", type = "Browser", sourceUrl = "http://localhost:3005/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"headless\":true}")
+    McpServer(id = 5, name = "Browser Automation", type = "Browser", sourceUrl = "http://localhost:3005/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"headless\":true}"),
+    McpServer(id = 6, name = "OllamaDev Sandbox", type = "Sandbox", sourceUrl = "http://localhost:5000/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{}")
 )
 
 private fun seedClaudeSkills() = listOf(
@@ -296,7 +322,9 @@ private fun seedClaudeSkills() = listOf(
     ClaudeSkill(id = 7, name = "Git Branch Creator", description = "Create and check out new local Git branches for code tasks.", category = "Development", isRecommended = true, isEnabled = true, usageExample = "git branch feature/auth-fix", requiredMcpServerType = "None", sourceToolName = null),
     ClaudeSkill(id = 8, name = "Git Auto-Stager & Committer", description = "Stage modified files and write clean conventional commits automatically.", category = "Development", isRecommended = true, isEnabled = true, usageExample = "git commit -am \"feat: add user authentication tokens\"", requiredMcpServerType = "None", sourceToolName = null),
     ClaudeSkill(id = 9, name = "Automated Compiler Self-Healer", description = "Verify Kotlin compilation and run auto-repair loops on code errors.", category = "Automation", isRecommended = true, isEnabled = true, usageExample = "Check kotlin compilation syntax and run healing loop", requiredMcpServerType = "None", sourceToolName = null),
-    ClaudeSkill(id = 10, name = "Gradle Test Runner", description = "Run local Gradle test tasks and parse trace reports.", category = "Automation", isRecommended = true, isEnabled = true, usageExample = "gradle test :app", requiredMcpServerType = "None", sourceToolName = null)
+    ClaudeSkill(id = 10, name = "Gradle Test Runner", description = "Run local Gradle test tasks and parse trace reports.", category = "Automation", isRecommended = true, isEnabled = true, usageExample = "gradle test :app", requiredMcpServerType = "None", sourceToolName = null),
+    ClaudeSkill(id = 11, name = "Pytest Sandbox Runner", description = "Run pytest in the workspace and return structured pass/fail output.", category = "Automation", isRecommended = true, isEnabled = false, usageExample = "MCP_CALL: run_pytest | {\"path\": \"tests\"}", requiredMcpServerType = "Sandbox", sourceToolName = "run_pytest"),
+    ClaudeSkill(id = 12, name = "Gradle Sandbox Runner", description = "Run the real Gradle unit-test command via the OllamaDev sandbox MCP server.", category = "Automation", isRecommended = true, isEnabled = false, usageExample = "MCP_CALL: run_gradle_test_command | {\"test_filter\": \"com.example.SprintOrchestratorTest\"}", requiredMcpServerType = "Sandbox", sourceToolName = "run_gradle_test_command")
 )
 
 /**
@@ -316,6 +344,8 @@ class FakeAppDatabase : AppDatabaseInterface {
     private val mcpServerDaoImpl = FakeMcpServerDao(seedMcpServers())
     private val mcpToolDaoImpl = FakeMcpToolDao()
     private val claudeSkillDaoImpl = FakeClaudeSkillDao(seedClaudeSkills())
+    private val sprintCycleDaoImpl = FakeSprintCycleDao()
+    private val sprintArtifactDaoImpl = FakeSprintArtifactDao()
 
     override fun ollamaNodeDao(): OllamaNodeDao = ollamaNodeDaoImpl
     override fun agentDao(): AgentDao = agentDaoImpl
@@ -328,4 +358,6 @@ class FakeAppDatabase : AppDatabaseInterface {
     override fun mcpServerDao(): McpServerDao = mcpServerDaoImpl
     override fun mcpToolDao(): McpToolDao = mcpToolDaoImpl
     override fun claudeSkillDao(): ClaudeSkillDao = claudeSkillDaoImpl
+    override fun sprintCycleDao(): SprintCycleDao = sprintCycleDaoImpl
+    override fun sprintArtifactDao(): SprintArtifactDao = sprintArtifactDaoImpl
 }

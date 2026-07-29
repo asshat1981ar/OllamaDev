@@ -16,4 +16,7 @@ interface LlmRouterInterface {
 
     /** Streaming freeform variant (consensus-vote scoring). */
     suspend fun generateFreeformStreaming(prompt: String, systemPrompt: String, onToken: suspend (String) -> Unit): String
+
+    /** Simple non-streaming prompt router used by sprint distillation and lightweight callers. */
+    suspend fun routePrompt(prompt: String, systemPrompt: String, preferCloud: Boolean = false): String
 }

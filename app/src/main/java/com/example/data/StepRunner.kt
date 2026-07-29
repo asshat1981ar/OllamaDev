@@ -104,7 +104,7 @@ class StepRunner(
 
         // 3) Run directives against the full output
         val mcpOutcome = actionExecutor.parseAndExecute(
-            taskId, req.agent.name, output, req.mcpSuccessActionType, req.mcpFailureActionType
+            taskId, req.agent.id, req.agent.name, output, req.mcpSuccessActionType, req.mcpFailureActionType
         )
 
         // 4) Final reinsert with the final actionType + full content (replaces the placeholder row)

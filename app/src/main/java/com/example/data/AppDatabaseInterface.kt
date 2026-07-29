@@ -17,4 +17,6 @@ interface AppDatabaseInterface {
     fun mcpServerDao(): McpServerDao
     fun mcpToolDao(): McpToolDao
     fun claudeSkillDao(): ClaudeSkillDao
+    fun sprintCycleDao(): SprintCycleDao
+    fun sprintArtifactDao(): SprintArtifactDao
 }

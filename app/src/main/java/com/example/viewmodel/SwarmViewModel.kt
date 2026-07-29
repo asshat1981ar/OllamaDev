@@ -1,10 +1,14 @@
 package com.example.viewmodel
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -20,6 +24,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 private const val TAG = "SwarmViewModel"
 private const val MAX_IMPORT_FILE_BYTES = 300 * 1024
@@ -50,6 +55,8 @@ class SwarmViewModel(
     // Deferred: references gitService/gitWorkDir declared further down, which are themselves
     // `by lazy` -- deferring this avoids reading them before their own initializers have run.
     private val swarmEngine by lazy { SwarmEngine(db, gitService, mcpClient, getApplication(), securePrefs, ollamaService, dispatcher) }
+    private val llmRouter = LlmRouter(ollamaService, db.ollamaNodeDao(), db.claudeSkillDao(), securePrefs, dispatcher)
+    private val sprintOrchestrator: SprintOrchestratorInterface = SprintOrchestrator(db, llmRouter, swarmEngine, PendingApprovalStore)
     private val moshi = Moshi.Builder().build()
 
     private val prefs = application.getSharedPreferences("ollama_swarm_prefs", Context.MODE_PRIVATE)
@@ -107,6 +114,108 @@ class SwarmViewModel(
     val totalSandboxRuns: StateFlow<Int> = AgentStateStore.agentStates.map { map ->
         map.values.sumOf { it.tasksExecuted }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    // Task analytics derived from recorded SwarmTask executions (Tier 3b)
+    data class AnalyticsSummary(
+        val totalTasks: Int = 0,
+        val totalTokens: Int = 0,
+        val totalExecutionTimeMs: Long = 0L,
+        val unresolvedCount: Int = 0,
+        val unresolvedRate: Float = 0f
+    )
+
+    data class ConfigAnalytics(
+        val configName: String,
+        val taskCount: Int = 0,
+        val avgTokens: Int = 0,
+        val avgTimeMs: Long = 0L,
+        val unresolvedCount: Int = 0,
+        val unresolvedRate: Float = 0f
+    )
+
+    data class DayBucket(
+        val dayLabel: String,
+        val taskCount: Int
+    )
+
+    private fun isUnresolved(task: SwarmTask): Boolean =
+        task.result?.contains("[UNRESOLVED]") == true || task.status == "Failed"
+
+    val analyticsSummary: StateFlow<AnalyticsSummary> = allTasks.map { tasks ->
+        val unresolved = tasks.count { isUnresolved(it) }
+        AnalyticsSummary(
+            totalTasks = tasks.size,
+            totalTokens = tasks.sumOf { it.tokenUsage },
+            totalExecutionTimeMs = tasks.sumOf { it.executionTimeMs },
+            unresolvedCount = unresolved,
+            unresolvedRate = if (tasks.isEmpty()) 0f else unresolved.toFloat() / tasks.size
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, AnalyticsSummary())
+
+    val analyticsPerConfig: StateFlow<List<ConfigAnalytics>> = combine(allTasks, allSwarmConfigs) { tasks, configs ->
+        configs.map { config ->
+            val swarmTasks = tasks.filter { it.swarmName == config.name }
+            val totalTokens = swarmTasks.sumOf { it.tokenUsage }
+            val totalTime = swarmTasks.sumOf { it.executionTimeMs }
+            val unresolved = swarmTasks.count { isUnresolved(it) }
+            ConfigAnalytics(
+                configName = config.name,
+                taskCount = swarmTasks.size,
+                avgTokens = if (swarmTasks.isEmpty()) 0 else (totalTokens.toDouble() / swarmTasks.size).roundToInt(),
+                avgTimeMs = if (swarmTasks.isEmpty()) 0L else totalTime / swarmTasks.size,
+                unresolvedCount = unresolved,
+                unresolvedRate = if (swarmTasks.isEmpty()) 0f else unresolved.toFloat() / swarmTasks.size
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val analyticsTimeSeries: StateFlow<List<DayBucket>> = allTasks.map { tasks ->
+        val formatter = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
+        tasks
+            .groupBy { formatter.format(java.util.Date(it.timestamp)) }
+            .map { (day, dayTasks) -> DayBucket(dayLabel = day, taskCount = dayTasks.size) }
+            .sortedBy { it.dayLabel }
+            .takeLast(7)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // Cloud token budget cap (0 = unlimited / legacy behavior)
+    private val _cloudTokenCap = MutableStateFlow(TaskBudgetTracker.readCloudTokenCap(prefs))
+    val cloudTokenCap: StateFlow<Int> = _cloudTokenCap.asStateFlow()
+
+    // Sprint orchestration state
+    val activeCycle = sprintOrchestrator.activeCycle
+    val sprintCycleProgress = sprintOrchestrator.cycleProgress
+    val sprintArtifacts = sprintOrchestrator.sprintArtifacts
+
+    // Runtime notification permission state (Android 13+)
+    private val _shouldRequestNotificationPermission = MutableStateFlow<String?>(null)
+    val shouldRequestNotificationPermission: StateFlow<String?> = _shouldRequestNotificationPermission.asStateFlow()
+
+    fun dismissNotificationPermissionRequest() {
+        _shouldRequestNotificationPermission.value = null
+    }
+
+    fun onNotificationPermissionResult(granted: Boolean) {
+        _hasNotificationPermission.value = granted
+    }
+
+    private val _hasNotificationPermission = MutableStateFlow(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                getApplication(), Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    )
+
+    /** Triggers a permission rationale dialog if notifications are not granted on Android 13+. */
+    fun ensureNotificationPermission(): Boolean {
+        if (_hasNotificationPermission.value) return true
+        _shouldRequestNotificationPermission.value =
+            "Background agentic-loop tasks need notification permission to show progress while the app is not in the foreground."
+        return false
+    }
 
     // Voice UI states
     private val _isVoiceListening = MutableStateFlow(false)
@@ -549,6 +658,12 @@ class SwarmViewModel(
         }
     }
 
+    // Sprint Operations
+    fun startSprintCycle(goal: String, seedContext: String = "") = sprintOrchestrator.runCycle(viewModelScope, goal, seedContext)
+    fun pauseSprintCycle() = sprintOrchestrator.pauseCycle()
+    fun resumeSprintCycle() = sprintOrchestrator.resumeCycle()
+    fun cancelSprintCycle() = sprintOrchestrator.cancelCycle()
+
     // Task Execution
     fun runSwarm(config: SwarmConfig, prompt: String) {
         viewModelScope.launch {
@@ -617,6 +732,21 @@ class SwarmViewModel(
                 ChatMessage(sender = config.name, role = "assistant", message = result, timestamp = System.currentTimeMillis())
             )
 
+            _isExecutingTask.value = false
+        }
+    }
+
+    /** Starts the selected swarm task in a foreground service if notification permission is granted.
+     *  On Android 13+ this will first trigger a permission rationale dialog if needed. */
+    fun runSwarmInBackground(prompt: String) {
+        val config = _selectedSessionSwarmConfig.value ?: allSwarmConfigs.value.firstOrNull() ?: return
+        if (!ensureNotificationPermission()) return
+        viewModelScope.launch {
+            _isExecutingTask.value = true
+            db.chatMessageDao().insertMessage(
+                ChatMessage(sender = "You", role = "user", message = "[BACKGROUND] $prompt", timestamp = System.currentTimeMillis())
+            )
+            com.example.service.AgenticLoopService.startAgenticLoop(getApplication(), config, prompt)
             _isExecutingTask.value = false
         }
     }
@@ -1259,6 +1389,12 @@ class SwarmViewModel(
         }
     }
 
+    fun setCloudTokenCap(cap: Int) {
+        val safeCap = cap.coerceAtLeast(0)
+        _cloudTokenCap.value = safeCap
+        prefs.edit().putString(TaskBudgetTracker.PREFS_KEY_CLOUD_TOKEN_CAP, safeCap.toString()).apply()
+    }
+
     fun commitChanges(message: String) {
         viewModelScope.launch {
             _gitError.value = null
@@ -1360,6 +1496,12 @@ class SwarmViewModel(
     val pendingFileChange: StateFlow<PendingFileChange?> = PendingApprovalStore.pendingFileChange
     fun acceptPendingFileChange() = PendingApprovalStore.acceptFileChange()
     fun rejectPendingFileChange() = PendingApprovalStore.rejectFileChange()
+
+    val pendingFileChangeBatch: StateFlow<PendingFileChangeBatch?> = PendingApprovalStore.pendingFileChangeBatch
+    fun acceptBatchFileChange(filePath: String) = PendingApprovalStore.setBatchFileDecision(filePath, true)
+    fun rejectBatchFileChange(filePath: String) = PendingApprovalStore.setBatchFileDecision(filePath, false)
+    fun confirmPendingFileChangeBatch() = PendingApprovalStore.confirmFileChangeBatch()
+    fun rejectAllPendingFileChanges() = PendingApprovalStore.rejectAllBatchFileChanges()
 
     /**
      * Hard-reverts the local git repo to [commit] and reconciles WorkspaceFile rows against the

@@ -121,7 +121,8 @@ class SwarmEngineMcpRiskReasoningTest {
         )
         val engine = buildEngine(db, ollama, FakeMcpClient(), FakeSecurePrefs(), context)
 
-        val job = launch { engine.executeTask(config, "deploy it") }
+        var taskId = -1
+        val job = launch { engine.executeTask(config, "deploy it", onTaskCreated = { taskId = it }) }
 
         val pending = PendingApprovalStore.pendingApproval.value
         assertNotNull("Expected a pending MCP destructive-call approval request", pending)
@@ -136,6 +137,11 @@ class SwarmEngineMcpRiskReasoningTest {
         // Approve so the engine proceeds and the coroutine completes.
         PendingApprovalStore.approve()
         job.join()
+
+        assertTrue(
+            "Expected an MCP_CALL_GATED step in the task timeline; steps: ${db.taskStepDao().getStepsForTaskSync(taskId).map { it.actionType }}",
+            db.taskStepDao().getStepsForTaskSync(taskId).any { it.actionType == "MCP_CALL_GATED" }
+        )
     }
 
     @Test
@@ -176,7 +182,8 @@ class SwarmEngineMcpRiskReasoningTest {
         )
         val engine = buildEngine(db, ollama, FakeMcpClient(), FakeSecurePrefs(), context)
 
-        val job = launch { engine.executeTask(config, "deploy it") }
+        var taskId = -1
+        val job = launch { engine.executeTask(config, "deploy it", onTaskCreated = { taskId = it }) }
 
         val pending = PendingApprovalStore.pendingApproval.value
         assertNotNull("Expected a pending MCP destructive-call approval request", pending)
@@ -192,5 +199,10 @@ class SwarmEngineMcpRiskReasoningTest {
         // Approve so the engine proceeds and the coroutine completes.
         PendingApprovalStore.approve()
         job.join()
+
+        assertTrue(
+            "Expected an MCP_CALL_GATED step in the task timeline; steps: ${db.taskStepDao().getStepsForTaskSync(taskId).map { it.actionType }}",
+            db.taskStepDao().getStepsForTaskSync(taskId).any { it.actionType == "MCP_CALL_GATED" }
+        )
     }
 }

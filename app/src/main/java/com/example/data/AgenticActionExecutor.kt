@@ -18,33 +18,46 @@ class AgenticActionExecutor(
 
     override suspend fun parseAndExecute(
         taskId: Int,
+        agentId: Int,
         agentName: String,
         output: String,
         mcpSuccessActionType: String,
         mcpFailureActionType: String
     ): ActionOutcome {
         var outcome = ActionOutcome(mcpCallAttempted = false, mcpCallSucceeded = false, mcpResultText = null)
+        val writeFilePaths = mutableListOf<String>()
         for (line in output.split("\n")) {
             val trimmed = line.trim()
             when {
                 trimmed.startsWith("git ") || trimmed.startsWith("$ git ") ->
-                    executeAgenticGitCommand(taskId, agentName, trimmed.removePrefix("$ ").trim())
+                    executeAgenticGitCommand(taskId, agentId, agentName, trimmed.removePrefix("$ ").trim())
                 trimmed.startsWith("MCP_CALL:") -> {
-                    val result = executeAgenticMcpCall(taskId, agentName, trimmed.removePrefix("MCP_CALL:").trim(), mcpSuccessActionType, mcpFailureActionType)
+                    val result = executeAgenticMcpCall(taskId, agentId, agentName, trimmed.removePrefix("MCP_CALL:").trim(), mcpSuccessActionType, mcpFailureActionType)
                     outcome = ActionOutcome(
                         mcpCallAttempted = true,
                         mcpCallSucceeded = result.isSuccess,
                         mcpResultText = result.getOrNull() ?: result.exceptionOrNull()?.message
                     )
                 }
-                trimmed.startsWith("WRITE_FILE:") ->
-                    executeAgenticFileWrite(taskId, agentName, trimmed.removePrefix("WRITE_FILE:").trim(), output)
+                trimmed.startsWith("WRITE_FILE:") -> {
+                    val path = trimmed.removePrefix("WRITE_FILE:").trim()
+                    if (path.isNotBlank() && path !in writeFilePaths) writeFilePaths.add(path)
+                }
             }
+        }
+        if (writeFilePaths.isNotEmpty()) {
+            executeAgenticFileWriteBatch(taskId, agentName, writeFilePaths, output)
         }
         return outcome
     }
 
-    private suspend fun executeAgenticGitCommand(taskId: Int, agentName: String, command: String) {
+    private suspend fun executeAgenticGitCommand(taskId: Int, agentId: Int, agentName: String, command: String) {
+        fun setAwaitingApproval(awaiting: Boolean) {
+            if (agentId != 0) {
+                AgentStateStore.setAgentActive(agentId, awaiting, if (awaiting) "Awaiting Approval" else "Idle")
+            }
+        }
+
         if (command.contains("commit")) {
             val message = try {
                 val match = Regex("""-m\s+["']([^"']+)["']""").find(command)
@@ -112,10 +125,12 @@ class AgenticActionExecutor(
                 return
             }
 
+            setAwaitingApproval(true)
             val approved = PendingApprovalStore.requestApproval(
                 taskId, agentName, ApprovalRiskCategory.GIT_PUSH,
                 "Push local commits to remote ($remoteUrl) requested by $agentName"
             )
+            setAwaitingApproval(false)
             if (!approved) {
                 db.taskStepDao().insertStep(
                     TaskStep(
@@ -161,11 +176,17 @@ class AgenticActionExecutor(
 
     private suspend fun executeAgenticMcpCall(
         taskId: Int,
+        agentId: Int,
         agentName: String,
         payload: String,
         successActionType: String = "MCP_TOOL_CALL",
         failureActionType: String = "MCP_CALL_FAILED"
     ): Result<String> {
+        fun setAwaitingApproval(awaiting: Boolean) {
+            if (agentId != 0) {
+                AgentStateStore.setAgentActive(agentId, awaiting, if (awaiting) "Awaiting Approval" else "Idle")
+            }
+        }
         val parts = payload.split("|", limit = 2)
         val skillName = parts.getOrNull(0)?.trim().orEmpty()
         val argsJson = parts.getOrNull(1)?.trim().orEmpty()
@@ -213,11 +234,24 @@ class AgenticActionExecutor(
         // string is null when the call isn't risky; otherwise it explains the matched reason.
         val riskReason = isRiskyMcpCallReason(toolEntity, skill)
         if (riskReason != null) {
+            // Surface the gating decision to the task timeline before the human approval dialog,
+            // so users can see *why* execution paused even if they later dismiss the dialog.
+            db.taskStepDao().insertStep(
+                TaskStep(
+                    taskId = taskId,
+                    agentName = "MCP Tool",
+                    agentRole = "System",
+                    actionType = "MCP_CALL_GATED",
+                    content = "$agentName requested '${skill.name}' ($toolName) on ${server.name}: $riskReason"
+                )
+            )
+            setAwaitingApproval(true)
             val approved = PendingApprovalStore.requestApproval(
                 taskId, agentName, ApprovalRiskCategory.MCP_DESTRUCTIVE_CALL,
                 "Call '${skill.name}' ($toolName) on ${server.name}",
                 detail = "$riskReason\n\nArgs: $argsJson"
             )
+            setAwaitingApproval(false)
             if (!approved) {
                 val message = "$agentName's call to '${skill.name}' ($toolName) was declined by user."
                 db.taskStepDao().insertStep(
@@ -277,47 +311,66 @@ class AgenticActionExecutor(
         return "Flagged by keyword: contains '$matchedKeyword'"
     }
 
-    /**
-     * Handles a `WRITE_FILE: <path>` directive with a dedicated, focused LLM round-trip whose
-     * entire response is expected to be the raw file content -- deliberately not parsed out of the
-     * act step's freeform response, since that would be brittle to the model not following an
-     * exact fenced-block format. The proposed content is routed through the same approval-gate
-     * singleton as risky actions for human diff review before it's written.
-     */
-    private suspend fun executeAgenticFileWrite(taskId: Int, agentName: String, filePath: String, context: String) {
-        if (filePath.isBlank()) return
-        val existing = db.workspaceFileDao().getFileByPath(filePath)
-        val contentPrompt = "Write the complete contents of the file at '$filePath' based on this " +
-            "context:\n$context\n\nRespond with ONLY the raw file content -- no markdown fences, " +
-            "no commentary, no explanation."
-        val proposedContent = llmRouter.generateFreeform(
-            contentPrompt,
-            "You are an expert software engineer producing exact file contents for direct use, not a chat response.",
-            preferCloud = true
-        )
 
-        val change = PendingFileChange(
+    /**
+     * Handles all `WRITE_FILE: <path>` directives from a single act step as one batched review.
+     * Each path gets its own focused LLM round-trip to generate raw file content, then a single
+     * human-approval dialog presents the whole batch. Approved files are applied; rejected files
+     * record a `FILE_CHANGE_REJECTED` step. This avoids N sequential dialogs when one step touches
+     * many files.
+     */
+    private suspend fun executeAgenticFileWriteBatch(
+        taskId: Int,
+        agentName: String,
+        filePaths: List<String>,
+        context: String
+    ) {
+        if (filePaths.isEmpty()) return
+        val changes = filePaths.map { path ->
+            val existing = db.workspaceFileDao().getFileByPath(path)
+            val contentPrompt = "Write the complete contents of the file at '$path' based on this " +
+                "context:\n$context\n\nRespond with ONLY the raw file content -- no markdown fences, " +
+                "no commentary, no explanation."
+            val proposedContent = llmRouter.generateFreeform(
+                contentPrompt,
+                "You are an expert software engineer producing exact file contents for direct use, not a chat response.",
+                preferCloud = true
+            )
+            PendingFileChange(
+                taskId = taskId,
+                agentName = agentName,
+                filePath = path,
+                originalContent = existing?.content.orEmpty(),
+                proposedContent = proposedContent,
+                isNewFile = existing == null
+            )
+        }
+
+        val batch = PendingFileChangeBatch(
+            id = System.currentTimeMillis(),
             taskId = taskId,
             agentName = agentName,
-            filePath = filePath,
-            originalContent = existing?.content.orEmpty(),
-            proposedContent = proposedContent,
-            isNewFile = existing == null
+            changes = changes
         )
-        val approved = PendingApprovalStore.requestFileChangeReview(change)
-        if (approved) {
-            if (existing != null) {
-                db.workspaceFileDao().updateFile(existing.copy(content = proposedContent, lastModified = System.currentTimeMillis()))
+        val decisions = PendingApprovalStore.requestFileChangeBatchReview(batch)
+
+        changes.forEach { change ->
+            val approved = decisions[change.filePath] ?: false
+            if (approved) {
+                val existing = db.workspaceFileDao().getFileByPath(change.filePath)
+                if (existing != null) {
+                    db.workspaceFileDao().updateFile(existing.copy(content = change.proposedContent, lastModified = System.currentTimeMillis()))
+                } else {
+                    db.workspaceFileDao().insertFile(WorkspaceFile(filePath = change.filePath, content = change.proposedContent))
+                }
+                db.taskStepDao().insertStep(
+                    TaskStep(taskId = taskId, agentName = agentName, agentRole = "System", actionType = "FILE_CHANGE_APPLIED", content = "Updated ${change.filePath} (${change.proposedContent.length} chars)")
+                )
             } else {
-                db.workspaceFileDao().insertFile(WorkspaceFile(filePath = filePath, content = proposedContent))
+                db.taskStepDao().insertStep(
+                    TaskStep(taskId = taskId, agentName = agentName, agentRole = "System", actionType = "FILE_CHANGE_REJECTED", content = "Proposed change to ${change.filePath} was declined by user.")
+                )
             }
-            db.taskStepDao().insertStep(
-                TaskStep(taskId = taskId, agentName = agentName, agentRole = "System", actionType = "FILE_CHANGE_APPLIED", content = "Updated $filePath (${proposedContent.length} chars)")
-            )
-        } else {
-            db.taskStepDao().insertStep(
-                TaskStep(taskId = taskId, agentName = agentName, agentRole = "System", actionType = "FILE_CHANGE_REJECTED", content = "Proposed change to $filePath was declined by user.")
-            )
         }
     }
 
@@ -327,7 +380,7 @@ class AgenticActionExecutor(
      * reliable checkpoint story. Mirrors the current WorkspaceFile set and commits; a "no changes"
      * failure (the todo touched no files) is expected/benign and not surfaced as an error step.
      */
-    override suspend fun autoCheckpoint(taskId: Int, agentName: String, todoText: String) {
+    override suspend fun autoCheckpoint(taskId: Int, agentId: Int, agentName: String, todoText: String) {
         val files = db.workspaceFileDao().getAllFiles().first()
         val (result, status) = withContext(dispatcher) {
             gitService.mirrorFiles(files)

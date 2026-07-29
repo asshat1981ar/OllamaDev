@@ -27,6 +27,9 @@ class LlmRouter(
     override suspend fun generateFreeformStreaming(prompt: String, systemPrompt: String, onToken: suspend (String) -> Unit): String =
         generateFromFallbackPool(prompt, systemPrompt, preferredModelName = null, onToken = onToken)
 
+    override suspend fun routePrompt(prompt: String, systemPrompt: String, preferCloud: Boolean): String =
+        generateFromFallbackPool(prompt, systemPrompt, preferredModelName = null, preferCloud = preferCloud)
+
     private suspend fun buildSkillsContext(): String {
         val activeSkills = skillDao.getAllSkillsSync().filter { it.isEnabled }
         return if (activeSkills.isNotEmpty()) {
