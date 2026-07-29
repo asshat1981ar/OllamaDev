@@ -159,6 +159,39 @@ interface GitCommitDao {
 }
 
 @Dao
+interface SprintCycleDao {
+    @Query("SELECT * FROM sprint_cycles ORDER BY startedAt DESC")
+    fun getAllCycles(): Flow<List<SprintCycle>>
+
+    @Query("SELECT * FROM sprint_cycles WHERE status = 'RUNNING' OR status = 'PAUSED' ORDER BY startedAt DESC LIMIT 1")
+    fun getActiveCycle(): Flow<SprintCycle?>
+
+    @Query("SELECT * FROM sprint_cycles WHERE id = :id")
+    suspend fun getCycleById(id: Int): SprintCycle?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCycle(cycle: SprintCycle): Long
+
+    @Update
+    suspend fun updateCycle(cycle: SprintCycle)
+}
+
+@Dao
+interface SprintArtifactDao {
+    @Query("SELECT * FROM sprint_artifacts WHERE cycleId = :cycleId ORDER BY completedAt ASC")
+    fun getArtifactsForCycle(cycleId: Int): Flow<List<SprintArtifact>>
+
+    @Query("SELECT * FROM sprint_artifacts WHERE cycleId = :cycleId ORDER BY completedAt ASC")
+    suspend fun getArtifactsForCycleSync(cycleId: Int): List<SprintArtifact>
+
+    @Query("SELECT * FROM sprint_artifacts WHERE cycleId = :cycleId AND phase = :phase ORDER BY completedAt DESC LIMIT 1")
+    suspend fun getLatestArtifactForPhase(cycleId: Int, phase: String): SprintArtifact?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertArtifact(artifact: SprintArtifact): Long
+}
+
+@Dao
 interface McpToolDao {
     @Query("SELECT * FROM mcp_tools WHERE serverId = :serverId ORDER BY name ASC")
     fun getToolsForServer(serverId: Int): Flow<List<McpToolEntity>>
