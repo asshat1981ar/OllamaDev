@@ -94,6 +94,22 @@ fun HistoryTaskRow(
     }
 }
 
+/** Pair of (icon, color) that gives each [TaskStep.actionType] a distinct visual signature. */
+private fun stepIconAndColorFor(actionType: String): Pair<androidx.compose.ui.graphics.vector.ImageVector, Color> = when (actionType.uppercase()) {
+    "THINKING", "PLAN" -> Icons.Rounded.Psychology to Color(0xFF9C27B0)
+    "OUTPUT" -> Icons.AutoMirrored.Rounded.ShortText to Color(0xFF2196F3)
+    "VERIFYING", "EXEC_RESULT" -> Icons.Rounded.FactCheck to Color(0xFF009688)
+    "EXEC_RESULT_FAILED", "MCP_CALL_FAILED", "ACTION_DECLINED", "FILE_CHANGE_REJECTED",
+    "GIT_COMMIT_FAILED", "GIT_PUSH_FAILED", "BUDGET_HALT" -> Icons.Rounded.Error to Color(0xFFEF4444)
+    "MCP_TOOL_CALL", "MCP_CALL_GATED" -> Icons.Rounded.Memory to Color(0xFFFF9800)
+    "GIT_COMMIT", "CHECKPOINT_COMMIT" -> Icons.Rounded.Commit to Color(0xFF4CAF50)
+    "GIT_PUSH" -> Icons.Rounded.CloudUpload to Color(0xFF4CAF50)
+    "GIT_BRANCH" -> Icons.Rounded.ForkRight to MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    "FILE_CHANGE_APPLIED" -> Icons.Rounded.EditNote to Color(0xFF2196F3)
+    "FINAL_RESPONSE" -> Icons.Rounded.CheckCircle to Color(0xFF4CAF50)
+    else -> Icons.Rounded.Circle to MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+}
+
 @Composable
 fun TaskStepTimelineItem(step: TaskStep) {
     val roleColor = when (step.agentRole.lowercase()) {
@@ -101,8 +117,12 @@ fun TaskStepTimelineItem(step: TaskStep) {
         "programmer" -> Color(0xFF4CAF50)
         "critic" -> Color(0xFFE91E63)
         "executive" -> Color(0xFFFF9800)
+        "qa engineer", "qa" -> Color(0xFF00B4D8)
+        "architect" -> Color(0xFF673AB7)
         else -> MaterialTheme.colorScheme.primary
     }
+
+    val (stepIcon, stepColor) = stepIconAndColorFor(step.actionType)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -156,11 +176,29 @@ fun TaskStepTimelineItem(step: TaskStep) {
                             )
                         }
                     }
-                    Text(
-                        text = step.actionType,
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.testTag("task_step_action_badge_${step.actionType}")
+                    ) {
+                        Icon(
+                            imageVector = stepIcon,
+                            contentDescription = null,
+                            tint = stepColor,
+                            modifier = Modifier.size(14.dp).testTag("task_step_action_icon_${step.actionType}")
+                        )
+                        Surface(
+                            color = stepColor.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = step.actionType,
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                                color = stepColor,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))

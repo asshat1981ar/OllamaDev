@@ -26,6 +26,15 @@ data class PendingFileChange(
     val isNewFile: Boolean
 )
 
+data class PendingFileChangeBatch(
+    val id: Long,
+    val taskId: Int,
+    val agentName: String,
+    val changes: List<PendingFileChange>,
+    /** Mutable per-file decisions: path -> approved. Only paths explicitly set are recorded. */
+    val decisions: MutableMap<String, Boolean> = mutableMapOf()
+)
+
 /**
  * Singleton bridge letting [SwarmEngine] (a plain class instantiated inside
  * SwarmViewModel, with no reference back into ViewModel-owned state) publish a
@@ -91,10 +100,52 @@ object PendingApprovalStore {
      * ViewModel state), so tests must call this to avoid leaking pending state or a
      * dangling deferred into the next test in the same JVM.
      */
+    private val _pendingFileChangeBatch = MutableStateFlow<PendingFileChangeBatch?>(null)
+    val pendingFileChangeBatch: StateFlow<PendingFileChangeBatch?> = _pendingFileChangeBatch.asStateFlow()
+    private var fileChangeBatchDeferred: CompletableDeferred<Map<String, Boolean>>? = null
+
+    /**
+     * Suspends until the user confirms a batch review, then returns the per-file approval map.
+     * The UI is expected to mutate [PendingFileChangeBatch.decisions] in place via
+     * [setBatchFileDecision] and finally call [confirmFileChangeBatch].
+     */
+    suspend fun requestFileChangeBatchReview(batch: PendingFileChangeBatch): Map<String, Boolean> {
+        val deferred = CompletableDeferred<Map<String, Boolean>>()
+        fileChangeBatchDeferred = deferred
+        _pendingFileChangeBatch.value = batch
+        val result = deferred.await()
+        _pendingFileChangeBatch.value = null
+        fileChangeBatchDeferred = null
+        return result
+    }
+
+    /** Records the user's per-file decision in the active batch. */
+    fun setBatchFileDecision(filePath: String, approved: Boolean) {
+        _pendingFileChangeBatch.value?.decisions?.put(filePath, approved)
+    }
+
+    /** Completes the active batch review, returning the collected decisions (defaulting any
+     *  unset file to rejected). */
+    fun confirmFileChangeBatch() {
+        val batch = _pendingFileChangeBatch.value ?: return
+        val result = batch.changes.associate { change ->
+            change.filePath to (batch.decisions[change.filePath] ?: false)
+        }
+        fileChangeBatchDeferred?.complete(result)
+    }
+
+    fun rejectAllBatchFileChanges() {
+        val batch = _pendingFileChangeBatch.value ?: return
+        batch.changes.forEach { batch.decisions[it.filePath] = false }
+        confirmFileChangeBatch()
+    }
+
     fun reset() {
         approvalDeferred = null
         _pendingApproval.value = null
         fileChangeDeferred = null
         _pendingFileChange.value = null
+        fileChangeBatchDeferred = null
+        _pendingFileChangeBatch.value = null
     }
 }
