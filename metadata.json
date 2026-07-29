@@ -1,0 +1,6 @@
+{
+  "name": "Ollama Swarm",
+  "description": "A decentralized AI agent swarm orchestrator running directly on-device with voice-driven controls and adaptive dashboard layouts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
