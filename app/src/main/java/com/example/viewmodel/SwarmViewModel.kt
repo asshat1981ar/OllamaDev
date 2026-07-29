@@ -913,7 +913,9 @@ class SwarmViewModel(
     val gitError: StateFlow<String?> = _gitError.asStateFlow()
 
     private val gitWorkDir by lazy {
-        File(getApplication<Application>().filesDir, "git_workspace").apply { mkdirs() }
+        val base = getApplication<Application>().filesDir
+            ?: File(System.getProperty("java.io.tmpdir"), "ollamadev_test_files")
+        File(base, "git_workspace").apply { mkdirs() }
     }
     private val gitService by lazy { GitService(gitWorkDir) }
 

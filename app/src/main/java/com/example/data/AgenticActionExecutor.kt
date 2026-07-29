@@ -194,7 +194,7 @@ class AgenticActionExecutor(
         // Resolve skill by display name or by the bound MCP tool name
         val skill = db.claudeSkillDao().getAllSkillsSync()
             .firstOrNull {
-                (it.name.equals(skillName, ignoreCase = true) || it.sourceToolName.equals(skillName, ignoreCase = true))
+                (it.name.equals(skillName, ignoreCase = true) || it.sourceToolName?.equals(skillName, ignoreCase = true) == true)
                         && it.isEnabled
             }
         if (skill == null) {

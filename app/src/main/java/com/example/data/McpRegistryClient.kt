@@ -182,7 +182,7 @@ fun RegistryServerDetail.resolveStreamableHttpUrl(): String? {
     if (remoteUrl != null) return remoteUrl
 
     return packages
-        .firstOrNull { it.transport?.type.equals("streamable-http", ignoreCase = true) }
+        .firstOrNull { it.transport?.type?.equals("streamable-http", ignoreCase = true) == true }
         ?.transport?.url
 }
 
