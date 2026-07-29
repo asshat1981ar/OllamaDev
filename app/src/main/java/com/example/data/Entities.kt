@@ -100,6 +100,32 @@ data class McpServer(
     val configuredParams: String = "{}" // Configuration parameters in JSON
 )
 
+@Entity(tableName = "sprint_cycles")
+data class SprintCycle(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val goal: String,
+    val status: String = "RUNNING", // RUNNING, PAUSED, COMPLETED, FAILED
+    val currentPhase: String = "DISCOVERY",
+    val startedAt: Long = System.currentTimeMillis(),
+    val completedAt: Long? = null,
+    val unresolvedCount: Int = 0,
+    val reimplCount: Int = 0,
+    val seedContext: String = ""
+)
+
+@Entity(tableName = "sprint_artifacts")
+data class SprintArtifact(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val cycleId: Int,
+    val phase: String,           // SprintPhase.name
+    val taskId: Int,             // FK to SwarmTask
+    val artifactPath: String,    // WorkspaceFile.filePath for the phase output doc
+    val distilledSummary: String,
+    val unresolvedItems: String = "", // newline-separated [UNRESOLVED] items
+    val gitCommitHash: String? = null,
+    val completedAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "mcp_tools")
 data class McpToolEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
