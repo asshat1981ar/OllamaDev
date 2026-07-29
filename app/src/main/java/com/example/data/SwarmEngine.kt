@@ -410,7 +410,7 @@ class SwarmEngine(
             // and we DON'T bump per-agent metrics for verify (the QA agent's tasksExecuted
             // only counts act steps, matching the pre-refactor engine).
             val qaAgent = pickQaAgent(agents, planningAgent)
-            val verifyPrompt = "The following step was just attempted:\n${next.text}\n\nAgent output:\n$decision\n\n" +
+            val verifyPrompt = "The following step was just attempted:\n${next.text}\n\nAgent output:\n${actResult.output}\n\n" +
                 "As QA, verify this was actually done correctly. If real test/execution tooling is " +
                 "available, invoke it via 'MCP_CALL: <tool> | <json args>' and report the real " +
                 "result -- do not fabricate output. If no tooling is available, say so plainly."

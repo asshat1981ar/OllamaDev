@@ -473,7 +473,7 @@ private fun ArtifactCard(
                 }
                 if (artifact.gitCommitHash != null) {
                     Icon(
-                        imageVector = Icons.Rounded.CommitSharp,
+                        imageVector = Icons.Rounded.Commit,
                         contentDescription = "Git checkpoint",
                         tint = Color(0xFF4CAF50),
                         modifier = Modifier.size(16.dp)
@@ -537,7 +537,7 @@ private fun ArtifactCard(
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Rounded.CommitSharp,
+                                imageVector = Icons.Rounded.Commit,
                                 contentDescription = null,
                                 tint = Color(0xFF4CAF50),
                                 modifier = Modifier.size(14.dp)

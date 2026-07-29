@@ -20,11 +20,12 @@ fun SystemConfigScreen(
     modifier: Modifier = Modifier
 ) {
     var selectedSubTab by remember { mutableStateOf(0) }
-    val tabTitles = listOf("Compute Nodes", "Agent Personas", "MCP Plugins")
+    val tabTitles = listOf("Compute Nodes", "Agent Personas", "MCP Plugins", "Budget")
     val tabIcons = listOf(
         Icons.Rounded.Storage,
         Icons.Rounded.SmartToy,
-        Icons.Rounded.Extension
+        Icons.Rounded.Extension,
+        Icons.Rounded.AccountBalance
     )
 
     Column(
@@ -71,6 +72,7 @@ fun SystemConfigScreen(
                 0 -> NodeScreen(viewModel = viewModel)
                 1 -> AgentScreen(viewModel = viewModel)
                 2 -> McpSkillsScreen(viewModel = viewModel)
+                3 -> BudgetScreen(viewModel = viewModel)
             }
         }
     }

@@ -95,6 +95,7 @@ fun HistoryTaskRow(
 }
 
 /** Pair of (icon, color) that gives each [TaskStep.actionType] a distinct visual signature. */
+@Composable
 private fun stepIconAndColorFor(actionType: String): Pair<androidx.compose.ui.graphics.vector.ImageVector, Color> = when (actionType.uppercase()) {
     "THINKING", "PLAN" -> Icons.Rounded.Psychology to Color(0xFF9C27B0)
     "OUTPUT" -> Icons.AutoMirrored.Rounded.ShortText to Color(0xFF2196F3)
