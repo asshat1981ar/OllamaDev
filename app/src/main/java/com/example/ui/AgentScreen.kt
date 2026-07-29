@@ -377,14 +377,20 @@ fun AgentCard(
                 ) {
                     val isActive = metrics?.isActive == true
                     if (isActive) {
+                        val status = metrics?.status ?: "ACTIVE"
+                        val statusColor = if (status.equals("Awaiting Approval", ignoreCase = true)) {
+                            Color(0xFFFF9800)
+                        } else {
+                            Color(0xFF4CAF50)
+                        }
                         Surface(
-                            color = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, Color(0xFF4CAF50)),
+                            color = statusColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, statusColor),
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
-                                text = (metrics?.status ?: "ACTIVE").uppercase(),
-                                color = Color(0xFF4CAF50),
+                                text = status.uppercase(),
+                                color = statusColor,
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

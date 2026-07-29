@@ -20,6 +20,7 @@ private class FakeActionExecutor(private val scriptedOutcome: ActionOutcome? = n
     val checkpointCalls = mutableListOf<Pair<Int, String>>()
     override suspend fun parseAndExecute(
         taskId: Int,
+        agentId: Int,
         agentName: String,
         output: String,
         mcpSuccessActionType: String,
@@ -28,7 +29,7 @@ private class FakeActionExecutor(private val scriptedOutcome: ActionOutcome? = n
         parsed += output
         return scriptedOutcome ?: ActionOutcome(mcpCallAttempted = false, mcpCallSucceeded = false, mcpResultText = null)
     }
-    override suspend fun autoCheckpoint(taskId: Int, agentName: String, todoText: String) {
+    override suspend fun autoCheckpoint(taskId: Int, agentId: Int, agentName: String, todoText: String) {
         checkpointCalls += taskId to todoText
     }
 }

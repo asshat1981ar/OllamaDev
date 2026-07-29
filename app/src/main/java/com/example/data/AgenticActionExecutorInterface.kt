@@ -14,6 +14,7 @@ interface AgenticActionExecutorInterface {
      *  that pass the approval gate. Returns an [ActionOutcome] describing any MCP attempt. */
     suspend fun parseAndExecute(
         taskId: Int,
+        agentId: Int,
         agentName: String,
         output: String,
         mcpSuccessActionType: String = "MCP_TOOL_CALL",
@@ -23,5 +24,5 @@ interface AgenticActionExecutorInterface {
     /** Engine-driven checkpoint after a todo's verify phase passes cleanly -- deliberately not
      *  left to the LLM's discretion to remember to emit a `git commit` line, since that's not a
      *  reliable checkpoint story. */
-    suspend fun autoCheckpoint(taskId: Int, agentName: String, todoText: String)
+    suspend fun autoCheckpoint(taskId: Int, agentId: Int, agentName: String, todoText: String)
 }

@@ -1,14 +1,19 @@
 package com.example
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -31,6 +36,12 @@ import com.example.viewmodel.SwarmViewModelFactory
 class MainActivity : ComponentActivity() {
     private val viewModel: SwarmViewModel by viewModels {
         SwarmViewModelFactory(application)
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        viewModel.onNotificationPermissionResult(isGranted)
     }
 
     override fun onResume() {
@@ -74,7 +85,7 @@ class MainActivity : ComponentActivity() {
                                 )
                                 Text("Requested by ${approval.agentName}: ${approval.description}", style = MaterialTheme.typography.bodySmall)
                                 if (approval.detail.isNotBlank()) {
-                                    Text(approval.detail, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                    Text("Reason: ${approval.detail}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                                 }
                             }
                         },
@@ -135,12 +146,125 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                val shouldRequestNotificationPermission by viewModel.shouldRequestNotificationPermission.collectAsState()
+                shouldRequestNotificationPermission?.let { rationale ->
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissNotificationPermissionRequest() },
+                        title = { Text("Enable Background Notifications") },
+                        text = { Text(rationale) },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    viewModel.dismissNotificationPermissionRequest()
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                },
+                                modifier = Modifier.testTag("grant_notification_permission_button")
+                            ) { Text("Grant") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.dismissNotificationPermissionRequest() }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+
+                val pendingFileChangeBatch by viewModel.pendingFileChangeBatch.collectAsState()
+                pendingFileChangeBatch?.let { batch ->
+                    val decisions = remember(batch.id) { mutableStateMapOf<String, Boolean>() }
+                    AlertDialog(
+                        onDismissRequest = { viewModel.rejectAllPendingFileChanges() },
+                        title = { Text("${batch.changes.size} File Changes Proposed") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("by ${batch.agentName}", style = MaterialTheme.typography.bodySmall)
+                                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                                    items(batch.changes) { change ->
+                                        val approved = decisions[change.filePath] ?: false
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = change.filePath,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                        TextButton(
+                                                            onClick = {
+                                                                decisions[change.filePath] = false
+                                                                viewModel.rejectBatchFileChange(change.filePath)
+                                                            },
+                                                            modifier = Modifier.testTag("reject_batch_file_${change.filePath}")
+                                                        ) { Text("Reject") }
+                                                        Button(
+                                                            onClick = {
+                                                                decisions[change.filePath] = true
+                                                                viewModel.acceptBatchFileChange(change.filePath)
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                                            modifier = Modifier.testTag("accept_batch_file_${change.filePath}")
+                                                        ) { Text("Accept", color = Color.White) }
+                                                    }
+                                                }
+                                                Text(
+                                                    text = if (approved) "Accepted" else "Pending",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (approved) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(120.dp)
+                                                        .background(Color(0xFF0F0E12), RoundedCornerShape(6.dp))
+                                                        .border(BorderStroke(1.dp, Color(0xFF231E29)), RoundedCornerShape(6.dp))
+                                                        .padding(4.dp)
+                                                ) {
+                                                    DiffView(
+                                                        diffLines = computeSimpleLineDiff(change.originalContent, change.proposedContent),
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = { viewModel.confirmPendingFileChangeBatch() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                modifier = Modifier.testTag("confirm_batch_file_changes_button")
+                            ) { Text("Confirm", color = Color.White) }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = { viewModel.rejectAllPendingFileChanges() },
+                                modifier = Modifier.testTag("reject_all_batch_file_changes_button")
+                            ) { Text("Reject All") }
+                        }
+                    )
+                }
+
                 val configuration = LocalConfiguration.current
                 val isExpanded = configuration.screenWidthDp >= 600
 
                 val navItems = listOf(
                     NavigationItem("session", "Session", Icons.Rounded.Terminal),
+                    NavigationItem("sprints", "Sprints", Icons.Rounded.AutoAwesomeMotion),
                     NavigationItem("manage", "Manage", Icons.Rounded.Dashboard),
+                    NavigationItem("analytics", "Analytics", Icons.Rounded.Analytics),
                     NavigationItem("settings", "System", Icons.Rounded.Settings)
                 )
 
@@ -232,7 +356,15 @@ class MainActivity : ComponentActivity() {
                         ) {
                             when (activeTab) {
                                 "session" -> SessionScreen(viewModel = viewModel)
+                                "sprints" -> SprintPlannerScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToSession = { taskId ->
+                                        activeTab = "session"
+                                        viewModel.selectTask(taskId)
+                                    }
+                                )
                                 "manage" -> ManageScreen(viewModel = viewModel)
+                                "analytics" -> AnalyticsScreen(viewModel = viewModel)
                                 "settings" -> SystemConfigScreen(viewModel = viewModel)
                             }
                         }

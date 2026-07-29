@@ -1,5 +1,6 @@
 package com.example.data
 
+import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -12,7 +13,10 @@ class SwarmEngine(
     private val appContext: android.content.Context,
     private val securePrefs: SecurePrefsInterface,
     private val ollamaService: OllamaService = OllamaServiceDefault,
-    private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO
+    private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val budgetTrackerFactory: (SharedPreferences) -> TaskBudgetTracker.Ledger = { prefs ->
+        TaskBudgetTracker.Ledger(TaskBudgetTracker.readCloudTokenCap(prefs))
+    }
 ) {
 
     // ORDER MATTERS: actionExecutor depends on llmRouter, stepRunner depends on both.
@@ -360,8 +364,22 @@ class SwarmEngine(
         )
 
         val transcript = StringBuilder(userPrompt)
+        val budgetLedger = budgetTrackerFactory(appContext.getSharedPreferences("ollama_swarm_prefs", android.content.Context.MODE_PRIVATE))
         var iteration = 0
         while (todos.any { !it.done } && iteration < maxIterations) {
+            if (budgetLedger.shouldHalt()) {
+                db.taskStepDao().insertStep(
+                    TaskStep(
+                        taskId = taskId,
+                        agentName = "Budget Guardrail",
+                        agentRole = "System",
+                        actionType = "BUDGET_HALT",
+                        content = budgetLedger.haltReason()
+                    )
+                )
+                todos = todos.map { if (it.done) it else it.copy(text = "${it.text} [BUDGET HALT]") }
+                break
+            }
             iteration++
             val next = todos.first { !it.done }
             val actor = pickAgentForRole(agents, next.role, planningAgent)
@@ -373,7 +391,7 @@ class SwarmEngine(
                 "create or modify a workspace file, emit a line 'WRITE_FILE: <relative/path.ext>' " +
                 "-- the actual file content is generated in a separate follow-up step, so do not " +
                 "inline file contents here."
-            val decision = stepRunner.run(taskId, { updateTaskStatus(taskId, it) }, StepRequest(
+            val actResult = stepRunner.run(taskId, { updateTaskStatus(taskId, it) }, StepRequest(
                 agent = actor,
                 prompt = actPrompt,
                 finalActionType = "OUTPUT",
@@ -382,8 +400,9 @@ class SwarmEngine(
                 thinkingDelayMs = 0,
                 interStepDelayMs = 0,
                 preferCloud = true
-            )).output
-            transcript.append("\n${next.text} -> $decision")
+            ))
+            budgetLedger.addTokens(actResult.approxTokens)
+            transcript.append("\n${next.text} -> ${actResult.output}")
 
             // Verify step: short delays, preferCloud=true, final actionType=VERIFYING
             // (matches the placeholder -- the verify row is REPLACED with the same VERIFYING
@@ -409,6 +428,7 @@ class SwarmEngine(
                 mcpFailureActionType = "EXEC_RESULT_FAILED",
                 recordMetrics = false
             ))
+            budgetLedger.addTokens(verifyResult.approxTokens)
             val verifyDecision = verifyResult.output
             val verifyOutcome = verifyResult.mcpOutcome
 
@@ -429,7 +449,7 @@ class SwarmEngine(
                 val finalText = if (looksFailed) "${next.text} [UNRESOLVED after $maxRetriesPerTodo attempts]" else next.text
                 todos = todos.map { if (it === next) it.copy(done = true, text = finalText) else it }
                 if (!looksFailed) {
-                    autoCheckpoint(taskId, agentName = qaAgent.name, todoText = next.text)
+                    autoCheckpoint(taskId, agentId = qaAgent.id, agentName = qaAgent.name, todoText = next.text)
                 }
             }
 
@@ -590,15 +610,16 @@ class SwarmEngine(
 
     private suspend fun parseAndExecuteAgenticActions(
         taskId: Int,
+        agentId: Int,
         agentName: String,
         output: String,
         mcpSuccessActionType: String = "MCP_TOOL_CALL",
         mcpFailureActionType: String = "MCP_CALL_FAILED"
     ): ActionOutcome =
-        actionExecutor.parseAndExecute(taskId, agentName, output, mcpSuccessActionType, mcpFailureActionType)
+        actionExecutor.parseAndExecute(taskId, agentId, agentName, output, mcpSuccessActionType, mcpFailureActionType)
 
-    private suspend fun autoCheckpoint(taskId: Int, agentName: String, todoText: String) {
-        actionExecutor.autoCheckpoint(taskId, agentName, todoText)
+    private suspend fun autoCheckpoint(taskId: Int, agentId: Int, agentName: String, todoText: String) {
+        actionExecutor.autoCheckpoint(taskId, agentId, agentName, todoText)
     }
 
     private suspend fun updateTaskStatus(taskId: Int, status: String) {
