@@ -27,78 +27,103 @@ separable, matching how PR #1 was scoped.
 
 ## Tier 1 — cheap, high leverage (do these first)
 
-- [ ] **Surface MCP risk-reasoning to the user.** `isRiskyMcpCall()` in
-      `SwarmEngine.kt` silently decides *why* a call was gated (a real
-      `destructiveHint`/`readOnlyHint` annotation vs. a keyword match) but
-      that reasoning never reaches the approval dialog — right now a gated
-      call just looks arbitrary. Thread the matched reason into
-      `PendingApproval.detail` (already a field) and render it in the
-      `MainActivity.kt` approval dialog. Small, no schema change, directly
-      improves trust in a feature just shipped.
-- [ ] **Cost/budget guardrail for cloud-preferred routing.** `preferCloud`
-      routing (added this session) means every agentic-loop task can burn up
-      to 16 iterations × 2 LLM calls against the paid Ollama Cloud Gateway
-      with zero spend visibility. Add a running token/cost estimate (reuse
-      the existing `(prompt.length + output.length) / 2 + 100` approximation
-      pattern already used for `AgentStateStore.recordExecutionMetrics`) and
-      either a soft warning or a configurable per-task cap before the loop
-      starts iteration N+1. This is a real-money risk introduced this
-      session — treat it as closer to a bug than a feature.
-- [ ] **TaskStep icon/color dispatch.** `TaskStepTimelineItem` in
-      `TaskStepComponents.kt` renders every `actionType` (including the new
-      `VERIFYING`/`EXEC_RESULT`/`CHECKPOINT_COMMIT`/`FILE_CHANGE_APPLIED`/
-      `FILE_CHANGE_REJECTED`/`ACTION_DECLINED` values) as plain monospace
-      text. Add a `when(actionType)` icon/semantic-color mapping (flagged as
-      an explicit deferred item in the original plan) so a running loop is
-      scannable at a glance instead of a wall of identical-looking rows.
+- [x] **Surface MCP risk-reasoning to the user.** `isRiskyMcpCallReason()` in
+      `AgenticActionExecutor.kt` now computes *why* a call was gated (real
+      `destructiveHint`/`readOnlyHint` annotation vs. keyword match) and
+      threads the reason into `PendingApproval.detail`. The approval dialog in
+      `MainActivity.kt` renders it as `Reason: ${approval.detail}`, and an
+      `MCP_CALL_GATED` `TaskStep` is recorded before the dialog so the timeline
+      explains the pause even if the user dismisses the dialog. Unit tests in
+      `AgenticActionExecutorTest` and `SwarmEngineMcpRiskReasoningTest` cover
+      both annotation and keyword paths. Done.
+- [x] **Cost/budget guardrail for cloud-preferred routing.** Added
+      `TaskBudgetTracker` which stores a user-configurable `cloud_token_cap`
+      in `ollama_swarm_prefs` (0 = unlimited/legacy behavior). `SwarmEngine`
+      now tracks per-task estimated tokens using the same `(prompt.length +
+      output.length) / 2 + 100` heuristic as `AgentStateStore`. When the cap is
+      non-zero and exceeded, the agentic loop halts before the next iteration,
+      marks remaining todos `[BUDGET HALT]`, and records a `BUDGET_HALT`
+      `TaskStep`. A new **Budget** sub-tab in `SystemConfigScreen` lets users
+      view session totals and edit the cap. Unit tests in
+      `SwarmEngineBudgetGuardrailTest` cover both halting (low cap) and
+      disabled (cap = 0) behavior. Done.
+- [x] **TaskStep icon/color dispatch.** `TaskStepTimelineItem` now maps
+      each known `actionType` to a semantic icon + color chip (planning =
+      purple, output = blue, verification = teal, failures/declines/halt =
+      red, MCP calls = amber, git commits/push = green, etc.) using a
+      `stepIconAndColorFor()` helper. The badge replaces the plain monospace
+      actionType text in the timeline card header. `agentRole` also got a few
+      extra color mappings (QA, Architect) so the timeline dot stays useful.
+      Compose test `TaskStepTimelineItemTest` verifies badges/icons render for
+      PLAN, OUTPUT, MCP_CALL_FAILED, and BUDGET_HALT. Done.
 
 ## Tier 2 — moderate effort, closes real UX gaps
 
-- [ ] **"Awaiting Approval" agent status.** `AgentMetrics.status` has no
-      value for "blocked waiting on you" — the dialog is the only signal,
-      invisible if the user is on another tab. `executeAgenticGitCommand`/
-      `executeAgenticMcpCall` only receive `agentName: String`, not an
-      `agentId`, so this needs either a DB lookup by name or threading an
-      id through the call chain — scope that decision explicitly before
-      starting. Pair with a distinct badge color in `AgentScreen.kt`
-      (`#FF9800`, already a documented recurring semantic color per
-      `CLAUDE.md` §1).
-- [ ] **Batch multi-file WRITE_FILE review.** Today each `WRITE_FILE:`
-      directive triggers its own `PendingFileChange` round-trip and its own
-      dialog — a task touching 5 files means 5 sequential approvals. Extend
-      `PendingApprovalStore`/`executeAgenticFileWrite` to collect all
-      `WRITE_FILE:` directives from one act-step's output and request one
-      batched review (list of diffs, single accept/reject-per-file or
-      accept-all). This is the biggest usability gap in the file-write path
-      as shipped.
+- [x] **"Awaiting Approval" agent status.** Threaded `agentId` through
+      `AgenticActionExecutorInterface.parseAndExecute()` and `autoCheckpoint()`,
+      from `StepRunner.run(req.agent.id)` down into the git-push and MCP-call
+      approval gates. Before `PendingApprovalStore.requestApproval()` suspends,
+      the executor calls `AgentStateStore.setAgentActive(agentId, true,
+      "Awaiting Approval")`; after the user approves/declines it restores the
+      agent to idle. `AgentScreen.kt` now renders an orange (`#FF9800`)
+      "AWAITING APPROVAL" badge when `AgentMetrics.status` matches. Tests in
+      `AgenticActionExecutorTest` and `AgentScreenAwaitingApprovalTest` cover
+      the status transition and UI rendering. Done.
+- [x] **Batch multi-file WRITE_FILE review.** `AgenticActionExecutor`
+      now scans an act step's full output, deduplicates all `WRITE_FILE:`
+      paths, and generates content for each before opening a single
+      `PendingFileChangeBatch` review. `PendingApprovalStore` gained
+      `pendingFileChangeBatch`, `requestFileChangeBatchReview`,
+      `setBatchFileDecision`, `confirmFileChangeBatch`, and
+      `rejectAllBatchFileChanges`. `MainActivity.kt` renders a scrollable
+      batch dialog with per-file Accept/Reject toggles, diff previews,
+      Confirm, and Reject All actions. `SwarmViewModel` exposes the batch
+      flow and delegates to the store. Tests in
+      `AgenticActionExecutorBatchFileWriteTest` cover collecting multiple
+      directives into one batch and applying a mix of accept/reject
+      decisions. Done.
 
 ## Tier 3 — bigger bets (highest ceiling, most scope)
 
-- [ ] **Real MCP test-runner integration.** The verify phase assumes *some*
-      Connected MCP server can run tests, but no such server exists in this
-      project today — every `SwarmEngineVerifyLoopTest` scripts a fake one.
-      This is the single item that would make "real execution" actually
-      real instead of hypothetical. Scope it down before starting: either
-      (a) write and document a minimal reference execution-sandbox MCP
-      server (even just "run pytest/gradle in a container, return
-      pass/fail + output") as a companion project, or (b) find and wire up
-      an existing open-source MCP test-runner server via the registry
-      browser (`RegistryBrowserDialog.kt`) and document the setup. Don't
-      start this without picking (a) or (b) explicitly first — it's easy to
-      scope-creep into building a whole sandboxing platform.
-- [ ] **In-app task analytics.** `SwarmTask.executionTimeMs`/`tokenUsage`
-      are already recorded but nothing reads them in aggregate. A new
-      screen (flat file under `ui/`, wired into `MainActivity.kt`'s
-      `when (activeTab)`, state in `SwarmViewModel.kt` per the existing
-      pattern) showing cost/time trends per `SwarmConfig` and
-      `[UNRESOLVED]` rate over time would answer "is the harness actually
-      working" without leaving the app.
-- [ ] **Background execution + notification.** Long agentic-loop runs
-      currently require keeping `SessionScreen` open. A foreground
-      `Service` + notification channel would let a task run unattended.
-      Highest infra cost of anything on this list (Android service
-      lifecycle, notification permissions on API 33+) — do this last unless
-      it's specifically requested sooner.
+- [x] **Real MCP test-runner integration.** Chose option (a): extended
+      the companion `ollamadev-mcp-server` with a new `sandbox.py` module
+      exposing four tools: `run_pytest`, `run_gradle_test_command`,
+      `run_shell_command` (annotated `destructiveHint=true`), and
+      `get_sandbox_status`. The tools run commands in `WORKSPACE_ROOT` and
+      return structured JSON pass/fail output. The server bootstrap now
+      registers the sandbox module; `meta.py` catalog and version were bumped
+      to 0.4.0; README was updated with the new Sandbox section and risk
+      gating note. In the Android app, `AppDatabase` seeder and
+      `FakeAppDatabase` now include an `OllamaDev Sandbox` MCP server of
+      type `Sandbox` and two new skills (`Pytest Sandbox Runner`, `Gradle
+      Sandbox Runner`) bound to `run_pytest` / `run_gradle_test_command`.
+      Tests in `ollamadev-mcp-server/tests/test_sandbox.py` cover status,
+      missing-pytest handling, shell success, and shell failure. Done.
+- [x] **In-app task analytics.** Added `AnalyticsScreen.kt` with aggregate
+      cards (total tasks, total tokens, execution time, unresolved rate), a
+      per-`SwarmConfig` breakdown table, and a 7-day task volume bar chart.
+      The screen is wired into `MainActivity.kt` as a new "Analytics" tab
+      in both bottom navigation and navigation rail. `SwarmViewModel.kt`
+      exposes `analyticsSummary`, `analyticsPerConfig`, and
+      `analyticsTimeSeries` StateFlows derived from `allTasks` and
+      `allSwarmConfigs`. Tests in `AnalyticsScreenTest` and
+      `SwarmViewModelAnalyticsTest` cover rendering and aggregation. Done.
+- [x] **Background execution + notification.** Added
+      `AgenticLoopService`, a foreground `Service` (type `dataSync`) that
+      owns its own `SwarmEngine` and runs `executeTask` outside the UI.
+      It creates a notification channel on first run, starts itself in the
+      foreground with a persistent progress notification, listens to
+      `TaskStep` updates for the active task to refresh the notification,
+      and finalizes the notification on completion/failure before stopping.
+      `AndroidManifest.xml` declares the service and permissions
+      (`FOREGROUND_SERVICE`, `FOREGGROUND_SERVICE_DATA_SYNC`,
+      `POST_NOTIFICATIONS`). `SwarmViewModel` gained `runSwarmInBackground()`,
+      `ensureNotificationPermission()`, and a permission-rationale StateFlow.
+      `MainActivity.kt` hosts the `RequestPermission()` launcher and renders
+      the rationale dialog; `SessionScreen` gates the cloud icon button on the
+      permission. Added `SwarmViewModelBackgroundRunTest` to verify the
+      ViewModel method records the background marker chat message without
+      crashing. Done.
 
 ---
 
@@ -108,7 +133,7 @@ These items implement the six-phase sprint cycle designed in
 `agent-os/product/specs/09-sdlc-sprint-workflows.md`. Dependencies flow
 downward — 4a must ship before 4b; 4b before 4c/4d; 4c/4d are independent.
 
-- [ ] **4a. DB migration: SprintCycle + SprintArtifact entities.**
+- [x] **4a. DB migration: SprintCycle + SprintArtifact entities.**
       Add `SprintCycle` and `SprintArtifact` to `Entities.kt` (already
       designed, see that file), add `SprintCycleDao` + `SprintArtifactDao` to
       `Daos.kt`, bump `AppDatabase.version` to the next integer, add a
@@ -118,7 +143,7 @@ downward — 4a must ship before 4b; 4b before 4c/4d; 4c/4d are independent.
       testDebugUnitTest` stays green; no `IllegalStateException: Room cannot
       verify the data integrity` at cold launch.
 
-- [ ] **4b. SprintOrchestrator wired into SwarmViewModel.**
+- [x] **4b. SprintOrchestrator wired into SwarmViewModel.**
       `SprintOrchestrator.kt` is written (data layer). Now:
       (1) Instantiate it in `SwarmViewModel` alongside `SwarmEngine` — inject
           `db`, `llmRouter`, `engine`, `pendingApprovalStore` from the same
@@ -140,7 +165,7 @@ downward — 4a must ship before 4b; 4b before 4c/4d; 4c/4d are independent.
       Verify: unit-test `SprintOrchestratorTest` with fake DAOs confirms
       6-phase cycle writes 6 `SprintArtifact` rows in order.
 
-- [ ] **4c. LlmRouterInterface.routePrompt() extension for distillation.**
+- [x] **4c. LlmRouterInterface.routePrompt() extension for distillation.**
       `SprintOrchestrator.distilArtifact()` calls
       `llmRouter.routePrompt(prompt, systemPrompt, preferCloud)` — this
       method doesn't exist on `LlmRouterInterface` yet. Add it as a new
@@ -151,7 +176,7 @@ downward — 4a must ship before 4b; 4b before 4c/4d; 4c/4d are independent.
       they are short, cheap, and don't benefit from cloud routing.
       Verify: `LlmRouterTest` covers the new overload with a fake node.
 
-- [ ] **4d. SprintPlannerScreen wired into MainActivity tab switch.**
+- [x] **4d. SprintPlannerScreen wired into MainActivity tab switch.**
       `SprintPlannerScreen.kt` is written. Now:
       (1) Add `"Sprints"` to the tab list in `MainActivity.kt` alongside
           the existing tabs. Follow the exact same `BottomNavigationItem`
@@ -177,3 +202,9 @@ real friction:
   `isCloudGatewayNode()`.
 - `GitCommit.stepId` FK (currently only `taskId`) for finer per-step
   checkpoint traceability.
+
+
+### Tier 5 — MCP write tool integration test
+**Priority:** low
+
+- [x] Verify that VERIFICATION agents can emit WRITE_FILE directives via `write_workspace_file` and have them land on disk. Added `tests/test_filesystem.py` to the companion `ollamadev-mcp-server`: it registers the filesystem tools on a test `MCPServer`, calls `write_workspace_file` through `mcp.call_tool`, and asserts the file (including parent directories) appears on disk and is returned by `list_workspace_files`. All six MCP server tests (filesystem + sandbox) pass. Done.

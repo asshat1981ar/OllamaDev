@@ -1,6 +1,6 @@
 package com.example.data
 
-import android.app.Application
+import android.content.Context
 
 /** Seam over [SecurePrefs] so tests can avoid real AndroidX Security/Keystore crypto. */
 interface SecurePrefsInterface {
@@ -11,10 +11,10 @@ interface SecurePrefsInterface {
     fun clearMcpToken(serverId: Int)
 }
 
-class RealSecurePrefs(private val application: Application) : SecurePrefsInterface {
-    override fun getGitToken(): String? = SecurePrefs.getGitToken(application)
-    override fun setGitToken(token: String) = SecurePrefs.setGitToken(application, token)
-    override fun getMcpToken(serverId: Int): String? = SecurePrefs.getMcpToken(application, serverId)
-    override fun setMcpToken(serverId: Int, token: String) = SecurePrefs.setMcpToken(application, serverId, token)
-    override fun clearMcpToken(serverId: Int) = SecurePrefs.clearMcpToken(application, serverId)
+class RealSecurePrefs(private val context: Context) : SecurePrefsInterface {
+    override fun getGitToken(): String? = SecurePrefs.getGitToken(context)
+    override fun setGitToken(token: String) = SecurePrefs.setGitToken(context, token)
+    override fun getMcpToken(serverId: Int): String? = SecurePrefs.getMcpToken(context, serverId)
+    override fun setMcpToken(serverId: Int, token: String) = SecurePrefs.setMcpToken(context, serverId, token)
+    override fun clearMcpToken(serverId: Int) = SecurePrefs.clearMcpToken(context, serverId)
 }
