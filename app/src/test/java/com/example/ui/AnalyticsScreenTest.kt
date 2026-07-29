@@ -9,6 +9,7 @@ import com.example.data.SwarmTask
 import com.example.viewmodel.SwarmViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.setMain
 import org.junit.Before
 import org.junit.Test
 import org.robolectric.annotation.Config
