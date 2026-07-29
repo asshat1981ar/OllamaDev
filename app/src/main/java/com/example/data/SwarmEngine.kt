@@ -378,6 +378,9 @@ class SwarmEngine(
                     )
                 )
                 todos = todos.map { if (it.done) it else it.copy(text = "${it.text} [BUDGET HALT]") }
+                db.taskStepDao().insertStep(
+                    TaskStep(id = planStepId, taskId = taskId, agentName = planningAgent.name, agentRole = planningAgent.role, actionType = "PLAN", content = renderChecklist())
+                )
                 break
             }
             iteration++
