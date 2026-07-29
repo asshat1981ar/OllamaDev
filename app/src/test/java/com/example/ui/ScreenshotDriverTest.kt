@@ -61,4 +61,24 @@ class ScreenshotDriverTest : UiTestBase() {
         advanceUntilIdle()
         composeRule.onRoot().captureRoboImage("build/outputs/roborazzi-screens/manage.png")
     }
+
+    // -- SprintPlannerScreen --------------------------------------------------
+
+    /** Phone-sized (360dp) render of [SprintPlannerScreen] with no active cycle. */
+    @Config(qualifiers = "w360dp-h800dp")
+    @Test
+    fun sprintPlannerScreen_phone() = runUiTest {
+        setContent { SprintPlannerScreen(viewModel = viewModel, onNavigateToSession = {}) }
+        advanceUntilIdle()
+        composeRule.onRoot().captureRoboImage("build/outputs/roborazzi-screens/sprint_planner_phone.png")
+    }
+
+    /** Tablet-sized (720dp) render of [SprintPlannerScreen] — exercises the master-detail Row layout. */
+    @Config(qualifiers = "w720dp-h1024dp")
+    @Test
+    fun sprintPlannerScreen_tablet() = runUiTest {
+        setContent { SprintPlannerScreen(viewModel = viewModel, onNavigateToSession = {}) }
+        advanceUntilIdle()
+        composeRule.onRoot().captureRoboImage("build/outputs/roborazzi-screens/sprint_planner_tablet.png")
+    }
 }

@@ -53,7 +53,16 @@ class SwarmViewModelBackgroundRunTest {
             securePrefs = FakeSecurePrefs()
         )
 
-        // The default selected swarm config is seeded by FakeAppDatabase.
+        // allSwarmConfigs is a WhileSubscribed StateFlow — it starts with emptyList() until a
+        // subscriber exists. runSwarmInBackground falls back to allSwarmConfigs.value.firstOrNull()
+        // which returns null on an unsubscribed flow, causing an early return before the chat
+        // message is inserted. Pre-select a config explicitly to bypass the flow subscription race.
+        val seedConfig = db.swarmConfigDao().getAllSwarmConfigs().let {
+            db.swarmConfigDao().getSwarmConfigById(1)
+        }
+        assertNotNull("FakeAppDatabase must seed at least one SwarmConfig", seedConfig)
+        viewModel.selectSessionSwarmConfig(seedConfig)
+
         viewModel.runSwarmInBackground("run this in the background")
         advanceUntilIdle()
 

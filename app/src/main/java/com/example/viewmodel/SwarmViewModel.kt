@@ -746,12 +746,15 @@ class SwarmViewModel(
      *  On Android 13+ this will first trigger a permission rationale dialog if needed. */
     fun runSwarmInBackground(prompt: String) {
         val config = _selectedSessionSwarmConfig.value ?: allSwarmConfigs.value.firstOrNull() ?: return
-        if (!ensureNotificationPermission()) return
         viewModelScope.launch {
-            _isExecutingTask.value = true
             db.chatMessageDao().insertMessage(
                 ChatMessage(sender = "You", role = "user", message = "[BACKGROUND] $prompt", timestamp = System.currentTimeMillis())
             )
+            if (!ensureNotificationPermission()) {
+                _isExecutingTask.value = false
+                return@launch
+            }
+            _isExecutingTask.value = true
             com.example.service.AgenticLoopService.startAgenticLoop(getApplication(), config, prompt)
             _isExecutingTask.value = false
         }
