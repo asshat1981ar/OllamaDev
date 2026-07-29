@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.MergeType
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -571,6 +572,6 @@ private fun phaseIcon(phase: SprintPhase): ImageVector = when (phase) {
     SprintPhase.DESIGN        -> Icons.Rounded.Architecture
     SprintPhase.IMPLEMENTATION -> Icons.Rounded.Code
     SprintPhase.VERIFICATION  -> Icons.Rounded.FactCheck
-    SprintPhase.INTEGRATION   -> Icons.Rounded.MergeType
+    SprintPhase.INTEGRATION   -> Icons.AutoMirrored.Rounded.MergeType
     SprintPhase.RETROSPECTIVE -> Icons.Rounded.History
 }
