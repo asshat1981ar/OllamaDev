@@ -52,8 +52,14 @@ class SwarmViewModel(
     private val securePrefs: SecurePrefsInterface = RealSecurePrefs(application)
 ) : AndroidViewModel(application) {
     private val db = database
-    // Deferred: references gitService/gitWorkDir declared further down, which are themselves
-    // `by lazy` -- deferring this avoids reading them before their own initializers have run.
+
+    private val gitWorkDir = run {
+        val base = getApplication<Application>().filesDir
+            ?: File(System.getProperty("java.io.tmpdir"), "ollamadev_test_files")
+        File(base, "git_workspace").apply { mkdirs() }
+    }
+    private val gitService = GitService(gitWorkDir)
+
     private val swarmEngine by lazy { SwarmEngine(db, gitService, mcpClient, getApplication(), securePrefs, ollamaService, dispatcher) }
     private val llmRouter = LlmRouter(ollamaService, db.ollamaNodeDao(), db.claudeSkillDao(), securePrefs, dispatcher)
     private val sprintOrchestrator: SprintOrchestratorInterface = SprintOrchestrator(db, llmRouter, swarmEngine, PendingApprovalStore)
@@ -911,13 +917,6 @@ class SwarmViewModel(
 
     private val _gitError = MutableStateFlow<String?>(null)
     val gitError: StateFlow<String?> = _gitError.asStateFlow()
-
-    private val gitWorkDir by lazy {
-        val base = getApplication<Application>().filesDir
-            ?: File(System.getProperty("java.io.tmpdir"), "ollamadev_test_files")
-        File(base, "git_workspace").apply { mkdirs() }
-    }
-    private val gitService by lazy { GitService(gitWorkDir) }
 
     private fun computeGitSyncState() {
         val lastPushedHash = prefs.getString("git_last_pushed_hash", null)
