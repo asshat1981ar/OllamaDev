@@ -102,6 +102,72 @@ separable, matching how PR #1 was scoped.
 
 ---
 
+## Tier 4 — Autonomous SDLC Sprint Workflow Chain (new, spec 09)
+
+These items implement the six-phase sprint cycle designed in
+`agent-os/product/specs/09-sdlc-sprint-workflows.md`. Dependencies flow
+downward — 4a must ship before 4b; 4b before 4c/4d; 4c/4d are independent.
+
+- [ ] **4a. DB migration: SprintCycle + SprintArtifact entities.**
+      Add `SprintCycle` and `SprintArtifact` to `Entities.kt` (already
+      designed, see that file), add `SprintCycleDao` + `SprintArtifactDao` to
+      `Daos.kt`, bump `AppDatabase.version` to the next integer, add a
+      `Migration(N, N+1)` that creates `sprint_cycles` and `sprint_artifacts`
+      tables, and add both `*::class` entries to `@Database(entities=[...])`.
+      Wire new DAOs through `AppDatabaseInterface`. Verify: `./gradlew
+      testDebugUnitTest` stays green; no `IllegalStateException: Room cannot
+      verify the data integrity` at cold launch.
+
+- [ ] **4b. SprintOrchestrator wired into SwarmViewModel.**
+      `SprintOrchestrator.kt` is written (data layer). Now:
+      (1) Instantiate it in `SwarmViewModel` alongside `SwarmEngine` — inject
+          `db`, `llmRouter`, `engine`, `pendingApprovalStore` from the same
+          constructor args already present.
+      (2) Expose `activeCycle: StateFlow<SprintCycle?>`,
+          `sprintCycleProgress: StateFlow<SprintProgress>`, and
+          `sprintArtifacts: StateFlow<List<SprintArtifact>>` on the ViewModel
+          following the `_backing / .asStateFlow()` pattern.
+      (3) Add `fun startSprintCycle(goal: String)`,
+          `fun pauseSprintCycle()`, `fun resumeSprintCycle()`,
+          `fun cancelSprintCycle()` to `SwarmViewModel` delegating to the
+          orchestrator.
+      (4) `SprintOrchestrator.collectPhaseArtifact` polls
+          `db.swarmTaskDao().getTaskById()` — this requires
+          `AppDatabaseInterface` to expose `swarmTaskDao()`,
+          `workspaceFileDao()`, `gitCommitDao()`, `sprintCycleDao()`, and
+          `sprintArtifactDao()`. Add the missing methods following the
+          existing interface-seam pattern (`agent-os/standards/data/interface-seam.md`).
+      Verify: unit-test `SprintOrchestratorTest` with fake DAOs confirms
+      6-phase cycle writes 6 `SprintArtifact` rows in order.
+
+- [ ] **4c. LlmRouterInterface.routePrompt() extension for distillation.**
+      `SprintOrchestrator.distilArtifact()` calls
+      `llmRouter.routePrompt(prompt, systemPrompt, preferCloud)` — this
+      method doesn't exist on `LlmRouterInterface` yet. Add it as a new
+      suspend fun returning `String`. Implement in `LlmRouter.kt` using the
+      same node-selection logic as the existing `route()` / `stream()` path,
+      but returning the full response as a single string (no streaming needed
+      for distillation). Mark `preferCloud = false` for distillation calls —
+      they are short, cheap, and don't benefit from cloud routing.
+      Verify: `LlmRouterTest` covers the new overload with a fake node.
+
+- [ ] **4d. SprintPlannerScreen wired into MainActivity tab switch.**
+      `SprintPlannerScreen.kt` is written. Now:
+      (1) Add `"Sprints"` to the tab list in `MainActivity.kt` alongside
+          the existing tabs. Follow the exact same `BottomNavigationItem`
+          pattern used by the other tabs. Icon: `Icons.Rounded.AutoAwesomeMotion`.
+      (2) Add `SprintPlannerScreen(viewModel = viewModel,
+          onNavigateToSession = { taskId -> activeTab = "Session"; ... })`
+          to the `when (activeTab)` branch.
+      (3) The `onNavigateToSession` callback should set `activeTab = "Session"`
+          and pass the task ID to `SessionScreen` — look at how
+          `DashboardScreen.onNavigateToSwarm` does this to thread a config
+          through to the session; do the analogous thing for a task ID.
+      Verify: Roborazzi screenshot of `SprintPlannerScreen` renders without
+      crash. Check phone (360dp) and tablet (720dp) width snapshots.
+
+---
+
 ## Deferred, not re-litigated here
 
 These were flagged as explicit open decisions in the original plan and are
