@@ -103,6 +103,16 @@ fun SessionScreen(
         }
     }
 
+    fun dispatchBackground() {
+        val prompt = inputText.trim()
+        if (prompt.isNotEmpty() && !isExecuting) {
+            if (viewModel.ensureNotificationPermission()) {
+                viewModel.runSwarmInBackground(prompt)
+                inputText = ""
+            }
+        }
+    }
+
     val configuration = LocalConfiguration.current
     val isExpanded = configuration.screenWidthDp >= 800
 
@@ -135,6 +145,7 @@ fun SessionScreen(
                     onMicClick = {
                         if (isVoiceListening) viewModel.stopListeningAndProcess() else viewModel.startListening()
                     },
+                    onBackgroundToggle = ::dispatchBackground,
                     onComputerPanelToggle = null
                 )
             }
@@ -172,6 +183,7 @@ fun SessionScreen(
                 onMicClick = {
                     if (isVoiceListening) viewModel.stopListeningAndProcess() else viewModel.startListening()
                 },
+                onBackgroundToggle = ::dispatchBackground,
                 onComputerPanelToggle = { viewModel.setComputerPanelExpanded(true) }
             )
         }
@@ -208,6 +220,7 @@ private fun SessionConversationPane(
     isVoiceListening: Boolean,
     isVoiceProcessing: Boolean,
     onMicClick: () -> Unit,
+    onBackgroundToggle: () -> Unit,
     onComputerPanelToggle: (() -> Unit)?
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -257,6 +270,18 @@ private fun SessionConversationPane(
                     imageVector = Icons.Rounded.History,
                     contentDescription = "Task History",
                     tint = if (isHistoryOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            IconButton(
+                onClick = onBackgroundToggle,
+                enabled = !isExecuting,
+                modifier = Modifier.testTag("session_background_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.CloudDone,
+                    contentDescription = "Run in background",
+                    tint = if (isExecuting) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary
                 )
             }
 
