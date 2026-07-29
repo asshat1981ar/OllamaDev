@@ -151,6 +151,9 @@ interface GitCommitDao {
     @Query("SELECT * FROM git_commits ORDER BY timestamp DESC")
     fun getAllCommits(): Flow<List<GitCommit>>
 
+    @Query("SELECT * FROM git_commits ORDER BY timestamp DESC")
+    suspend fun getAllCommitsSync(): List<GitCommit>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCommit(commit: GitCommit): Long
 

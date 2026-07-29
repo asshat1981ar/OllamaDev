@@ -419,6 +419,8 @@ private fun DailyTaskVolumeChart(tasks: List<SwarmTask>) {
                     )
                 }
             } else {
+                val primaryColor = MaterialTheme.colorScheme.primary
+                val onSurfaceColor = MaterialTheme.colorScheme.onSurface
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -437,7 +439,7 @@ private fun DailyTaskVolumeChart(tasks: List<SwarmTask>) {
                         val x = (index * stepX) + (stepX / 2f)
                         val barHeight = (count.toFloat() / max) * chartHeight
                         val top = chartHeight - barHeight
-                        val color = if (count == max) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                        val color = if (count == max) primaryColor else primaryColor.copy(alpha = 0.7f)
 
                         drawRect(
                             color = color,
@@ -446,7 +448,7 @@ private fun DailyTaskVolumeChart(tasks: List<SwarmTask>) {
                         )
 
                         drawLine(
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                            color = onSurfaceColor.copy(alpha = 0.2f),
                             start = Offset(x, chartHeight),
                             end = Offset(x, chartHeight + 4.dp.toPx()),
                             strokeWidth = 1f

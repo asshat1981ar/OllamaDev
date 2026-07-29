@@ -16,7 +16,7 @@ import com.example.data.RealSecurePrefs
 import com.example.data.SwarmConfig
 import com.example.data.SwarmEngine
 import com.example.data.SwarmTask
-import com.example.ui.NotificationHelpers.AGENTIC_LOOP_NOTIFICATION_ID
+import com.example.ui.AGENTIC_LOOP_NOTIFICATION_ID
 import com.example.ui.createAgenticNotificationChannel
 import com.example.ui.buildAgenticLoopNotification
 import com.example.ui.finalizeAgenticLoopNotification
