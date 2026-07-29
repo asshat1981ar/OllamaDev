@@ -83,7 +83,7 @@ class SwarmViewModelAnalyticsTest {
         assertEquals(1, featureConfig.unresolvedCount)
     }
 
-    private fun seedAnalyticsData(db: FakeAppDatabase) {
+    private suspend fun seedAnalyticsData(db: FakeAppDatabase) {
         // Day one tasks
         db.swarmTaskDao().insertTask(
             SwarmTask(prompt = "d1 spec a", status = "Completed", swarmName = "SDLC Spec & Design Swarm", executionTimeMs = 1000L, tokenUsage = 100, timestamp = DAY_ONE + 1_000_000)

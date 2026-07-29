@@ -160,6 +160,7 @@ private class FakeChatMessageDao(seed: List<ChatMessage>) : ChatMessageDao {
 private class FakeGitCommitDao : GitCommitDao {
     private val store = InMemoryStore<GitCommit>(emptyList(), { it.id }, { item, id -> item.copy(id = id) })
     override fun getAllCommits(): Flow<List<GitCommit>> = store.flow()
+    override suspend fun getAllCommitsSync(): List<GitCommit> = store.snapshot().sortedByDescending { it.timestamp }
     override suspend fun insertCommit(commit: GitCommit): Long = store.insertOrReplace(commit)
     override suspend fun clearCommits() = store.clear()
 }
