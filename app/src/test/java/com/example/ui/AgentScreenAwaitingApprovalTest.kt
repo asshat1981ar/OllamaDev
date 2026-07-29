@@ -2,7 +2,6 @@ package com.example.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
-import com.example.data.Agent
 import com.example.data.AgentStateStore
 import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Test
@@ -11,18 +10,25 @@ class AgentScreenAwaitingApprovalTest : UiTestBase() {
 
     @Test
     fun agentWithAwaitingApprovalStatus_rendersOrangeBadge() = runUiTest {
-        val agent = Agent(id = 1, name = "Byte Code", role = "Programmer", modelName = "llama3", systemPrompt = "", colorHex = "#4CAF50")
-        viewModel.addAgent(agent.name, agent.role, agent.modelName, agent.systemPrompt, agent.colorHex)
+        // Render the screen first so Compose subscribes to viewModel.allAgents,
+        // causing the WhileSubscribed StateFlow to start and emit the seeded agents.
+        setContent { AgentScreen(viewModel = viewModel) }
         advanceUntilIdle()
 
-        val inserted = viewModel.allAgents.value.firstOrNull { it.name == agent.name } ?: agent
+        // Now allAgents.value is populated. Find "Byte Code" (seeded as id=2).
+        val agents = viewModel.allAgents.value
+        val byteCode = agents.firstOrNull { it.name == "Byte Code" }
+            ?: agents.firstOrNull()
+            ?: throw IllegalStateException("FakeAppDatabase must seed at least one agent")
 
-        // AgentStateStore.setAgentActive is a no-op when the agent has no entry yet.
-        // Explicitly initialize the store so the agent entry exists before setting the status.
-        AgentStateStore.initializeAgents(listOf(inserted))
-        AgentStateStore.setAgentActive(inserted.id, true, "Awaiting Approval")
+        // AgentStateStore.setAgentActive is a no-op for agents not in the store yet.
+        // Initialize the full roster so every agent gets an entry, then set the status.
+        AgentStateStore.initializeAgents(agents)
+        AgentStateStore.setAgentActive(byteCode.id, true, "Awaiting Approval")
 
-        setContent { AgentScreen(viewModel = viewModel) }
+        // Give Compose a chance to recompose after the state change
+        advanceUntilIdle()
+
         composeRule.onNodeWithText("AWAITING APPROVAL").assertIsDisplayed()
     }
 }

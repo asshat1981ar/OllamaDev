@@ -76,7 +76,9 @@ class SprintOrchestratorTest {
      *
      * @param delegate  the task DAO from the underlying [FakeAppDatabase]
      * @param fileDao   the workspace-file DAO to write the artifact into
-     * @param scriptedArtifactContent  phase-name → file content overrides
+     * @param scriptedArtifactContent  phase-name → file content overrides; the content
+     *   is used only on the *first* call for that phase — subsequent calls use the
+     *   default placeholder so a re-queued IMPLEMENTATION/VERIFICATION doesn't loop forever
      * @param phaseCallCounts  mutated in-place to track how often each phase was launched
      * @param capturedPrompts  every [SwarmTask.prompt] value appended here for assertions
      */
@@ -87,6 +89,10 @@ class SprintOrchestratorTest {
         private val phaseCallCounts: MutableMap<String, Int>,
         private val capturedPrompts: MutableList<String>
     ) : SwarmTaskDao by delegate {
+
+        // Track how many times we've already used each scripted override so we only
+        // return the unresolved/scripted content on the first call for that phase.
+        private val scriptedUsedCount = mutableMapOf<String, Int>()
 
         override suspend fun insertTask(task: SwarmTask): Long {
             // swarmName format: "Sprint <id> / <PHASENAME>"
@@ -101,8 +107,15 @@ class SprintOrchestratorTest {
             val phase = SprintPhase.values().firstOrNull { it.name == phaseName }
             if (phase != null) {
                 val artifactPath = phase.artifactPath(cycleId = 1)
-                val content = scriptedArtifactContent[phaseName]
-                    ?: "# ${phase.name} Artifact\n\nCompleted successfully."
+                val usedCount = scriptedUsedCount[phaseName] ?: 0
+                val content = if (usedCount == 0 && scriptedArtifactContent.containsKey(phaseName)) {
+                    // First call for this phase: return the scripted (possibly unresolved) content
+                    scriptedArtifactContent[phaseName]!!
+                } else {
+                    // Subsequent calls (re-queue): return a clean passing artifact
+                    "# ${phase.name} Artifact\n\nCompleted successfully."
+                }
+                scriptedUsedCount[phaseName] = usedCount + 1
                 fileDao.insertFile(WorkspaceFile(filePath = artifactPath, content = content))
             }
             return id.toLong()
