@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -51,9 +52,9 @@ private class ScriptedFileWriteOllamaService(
 }
 
 /**
- * Covers the WRITE_FILE directive: a `WRITE_FILE: <path>` line in the act step's output triggers
- * a dedicated round-trip LLM call for the file content, then routes the proposed change through
- * [PendingApprovalStore]'s file-change gate for human diff review before it's written.
+ * End-to-end coverage of the WRITE_FILE directive inside an AGENTIC_LOOP swarm.
+ * The act step emits `WRITE_FILE: <path>`, which triggers a focused LLM round-trip for content,
+ * then routes the change through [PendingApprovalStore]'s batched file-change review gate.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -98,16 +99,18 @@ class SwarmEngineFileWriteTest {
         var taskId: Int? = null
         val job = launch { taskId = engine.executeTask(config, "add a new module") }
 
-        val pending = PendingApprovalStore.pendingFileChange.value
-        assertTrue("Expected a pending file change for new_module.py, got: $pending", pending != null && pending.filePath == "new_module.py")
-        assertTrue("A brand-new file should be flagged isNewFile", pending!!.isNewFile)
-        assertEquals("print('hello from new module')", pending.proposedContent)
-        assertEquals("", pending.originalContent)
+        val batch = PendingApprovalStore.pendingFileChangeBatch.value
+        assertNotNull("Expected a batched file-change review, got: $batch", batch)
+        val change = batch!!.changes.first { it.filePath == "new_module.py" }
+        assertTrue("A brand-new file should be flagged isNewFile", change.isNewFile)
+        assertEquals("print('hello from new module')", change.proposedContent)
+        assertEquals("", change.originalContent)
 
-        PendingApprovalStore.acceptFileChange()
+        PendingApprovalStore.setBatchFileDecision("new_module.py", true)
+        PendingApprovalStore.confirmFileChangeBatch()
         job.join()
 
-        assertTrue(PendingApprovalStore.pendingFileChange.value == null)
+        assertTrue(PendingApprovalStore.pendingFileChangeBatch.value == null)
         val file = db.workspaceFileDao().getFileByPath("new_module.py")
         assertTrue("Expected the new file to be created", file != null)
         assertEquals("print('hello from new module')", file!!.content)
@@ -138,12 +141,14 @@ class SwarmEngineFileWriteTest {
         var taskId: Int? = null
         val job = launch { taskId = engine.executeTask(config, "update the module") }
 
-        val pending = PendingApprovalStore.pendingFileChange.value
-        assertTrue(pending != null && pending.filePath == "existing_file.py")
-        assertTrue("Modifying an existing file should not be flagged isNewFile", !pending!!.isNewFile)
-        assertEquals("original content", pending.originalContent)
+        val batch = PendingApprovalStore.pendingFileChangeBatch.value
+        assertNotNull(batch)
+        val change = batch!!.changes.first { it.filePath == "existing_file.py" }
+        assertTrue("Modifying an existing file should not be flagged isNewFile", !change.isNewFile)
+        assertEquals("original content", change.originalContent)
 
-        PendingApprovalStore.rejectFileChange()
+        PendingApprovalStore.setBatchFileDecision("existing_file.py", false)
+        PendingApprovalStore.confirmFileChangeBatch()
         job.join()
 
         val file = db.workspaceFileDao().getFileByPath("existing_file.py")
