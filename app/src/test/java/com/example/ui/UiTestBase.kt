@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
 import com.example.viewmodel.SwarmViewModel
+import com.example.data.AgentStateStore
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.TestScope
@@ -52,6 +53,10 @@ abstract class UiTestBase {
 
     @Before
     open fun setUp() {
+        // AgentStateStore is a process-wide singleton (like PendingApprovalStore); reset it here
+        // so isActive/status leaked from a previous test in the same JVM run can't bleed into
+        // this test's agent-card assertions.
+        AgentStateStore.resetAllActiveStates()
         Dispatchers.setMain(testDispatcher)
         val context = ApplicationProvider.getApplicationContext<Application>()
         viewModel = SwarmViewModel(
@@ -68,6 +73,9 @@ abstract class UiTestBase {
     @After
     open fun tearDown() {
         Dispatchers.resetMain()
+        // Also clear on the way out so a test that throws mid-assertion (leaving isActive = true)
+        // doesn't poison the next test either.
+        AgentStateStore.resetAllActiveStates()
     }
 
     /** Sets a compact phone-sized display (360x640 dp). Must be called before [setContent]. */
