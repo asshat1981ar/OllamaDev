@@ -1,0 +1,19 @@
+# Nightly Maintenance — full test + build + lint on the default branch so regressions and
+# deprecation warnings surface without blocking a merge. Runs every day at 03:00 UTC; can
+# also be triggered on demand. cache_read_only=false so this job refreshes the shared
+# main-branch gradle cache used by feature branches and the local cache-pull script.
+name: Nightly Maintenance
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  full:
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: ':app:testDebugUnitTest :app:assembleDebug :app:lintDebug'
+      artifact_name: nightly-outputs
+      cache_read_only: false
+      timeout_minutes: 45

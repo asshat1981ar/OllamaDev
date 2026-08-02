@@ -10,6 +10,9 @@
 # NOTE: dispatch runs against a *pushed* ref (branch/tag/SHA). Uncommitted local working-tree
 # changes are not visible to GitHub; commit+push them first (delegate-build.sh --commit does
 # this for you).
+#
+# The heavy lifting lives in the reusable gradle-task.yml runner; this workflow just exposes
+# the `task` + optional `ref` inputs via workflow_dispatch and picks the artifact name.
 name: Remote Build Delegation
 
 on:
@@ -26,49 +29,8 @@ on:
 
 jobs:
   delegate:
-    name: Run delegated gradle task
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          # inputs.ref is optional; when blank GitHub already checked out the triggering ref,
-          # so leave it to resolve to that. When an explicit ref is given, check it out.
-          ref: ${{ inputs.ref }}
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      # Reuse Gradle dependency/distribution caches. cache-read-only avoids evicting the
-      # shared main-branch cache from PR/feature-branch runs, exactly like the main CI.
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          cache-read-only: true
-
-      # The task string is expanded verbatim so the caller controls exactly what runs.
-      # Flexible by design; this workflow is only dispatch-triggered by users with write
-      # access to this repo, so the injection surface is acceptable.
-      - name: Run delegated gradle task
-        id: gradle
-        run: ./gradlew ${{ inputs.task }}
-
-      # Package whatever the task produced so the caller can download it back.
-      # Covers the debug APK, JUnit HTML/XML reports, and real Roborazzi screenshots
-      # (app/build/outputs/roborazzi-screens/*.png). Always upload (even on failure) so a
-      # red run still returns its reports to diagnose.
-      - name: Upload build outputs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: remote-build-outputs
-          path: |
-            app/build/outputs/**
-            app/build/reports/**
-          if-no-files-found: warn
-          retention-days: 14
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: ${{ inputs.task }}
+      ref: ${{ inputs.ref }}
+      artifact_name: remote-build-outputs

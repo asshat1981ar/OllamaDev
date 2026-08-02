@@ -1,0 +1,82 @@
+# Reusable "run a gradle task and upload the outputs" job.
+#
+# The single source of truth for delegating gradle work to a fresh x86_64
+# ubuntu runner: checkout -> JDK 17 -> warmed gradle cache -> run the task ->
+# upload artifacts (always, even on failure). Android CI, Remote Build
+# Delegation, screenshots, nightly, and lint all call this via workflow_call.
+#
+# Security note: `task` is expanded verbatim into `./gradlew ${{ inputs.task }}`.
+# Reusable workflows can only be called by workflows in this repository, and
+# callers only pass values from their own inputs/expressions, so this is
+# acceptable here -- the same tradeoff already documented in remote-build.yml.
+name: Gradle task runner (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      task:
+        description: 'Gradle command line to run, e.g. ":app:testDebugUnitTest" or ":app:assembleDebug"'
+        required: true
+        type: string
+      ref:
+        description: 'Optional branch/tag/SHA to check out (default: the triggering ref)'
+        required: false
+        type: string
+        default: ''
+      artifact_name:
+        description: Artifact name for the uploaded outputs
+        required: false
+        type: string
+        default: 'build-outputs'
+      upload_patterns:
+        description: 'Newline-separated artifact path patterns to upload (default: build outputs + reports)'
+        required: false
+        type: string
+        default: |
+          app/build/outputs/**
+          app/build/reports/**
+      cache_read_only:
+        description: Only restore the gradle cache without writing back (true on branches)
+        required: false
+        type: boolean
+        default: true
+      timeout_minutes:
+        description: Job timeout in minutes
+        required: false
+        type: number
+        default: 30
+
+jobs:
+  run:
+    name: ${{ inputs.task }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ inputs.cache_read_only }}
+
+      - name: Run gradle task
+        run: ./gradlew ${{ inputs.task }}
+
+      - name: Upload build outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.upload_patterns }}
+          if-no-files-found: warn
+          retention-days: 14

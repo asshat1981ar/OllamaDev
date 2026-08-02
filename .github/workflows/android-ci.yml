@@ -15,85 +15,38 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The gate is now parallel instead of serial: the unit suite is split into three matrix
+# shards (ui / data / rest) and the APK build runs concurrently, so the gate wall-clock is
+# roughly max(test, build) instead of test + build. Every job delegates to the reusable
+# gradle-task.yml runner (checkout + JDK 17 + warmed cache + upload).
 jobs:
   test:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # The project's gradle-wrapper.properties pins gradle-9.3.1-bin.zip, so actions/setup-java
-      # only needs to install the JDK the wrapper runs on. JDK 17 matches the project's expected
-      # toolchain; the wrapper would also accept 21. JDK 17 is the conservative default that
-      # matches what Android Studio Iguana+ uses for AGP 9.x projects.
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      # Pre-cache the Gradle distribution and the project's incremental-build caches under
-      # ~/.gradle. Cache key excludes AGP/Kotlin plugin versions from the gradle-deps bucket
-      # because those rarely change; the wrapper-version key covers the distribution itself.
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-
-      # Single canonical validation: full unit test suite. The project gates on this; if it
-      # breaks, no PR merges. -Pci=true isn't set because the project doesn't ship a CI flag
-      # in gradle.properties; forkEvery and heap bounds come from the project's own build.gradle.kts.
-      - name: Run unit tests
-        run: ./gradlew :app:testDebugUnitTest
-
-      # Upload the JUnit HTML + XML reports so failures are inspectable from the Actions UI
-      # without re-running locally. Always run, even on failure (if: always()), so a red test
-      # still surfaces the report.
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-report
-          path: |
-            app/build/reports/tests/testDebugUnitTest/
-            app/build/test-results/testDebugUnitTest/
-          retention-days: 14
-          if-no-files-found: warn
+    name: Unit tests (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: ui
+            filter: "--tests 'com.example.ui.*'"
+          - shard: data
+            filter: "--tests 'com.example.data.*'"
+          - shard: rest
+            filter: "--tests 'com.example.ExampleUnitTest' --tests 'com.example.GitServiceSpikeTest' --tests 'com.example.viewmodel.*'"
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: ':app:testDebugUnitTest ${{ matrix.filter }}'
+      artifact_name: unit-test-report-${{ matrix.shard }}
+      upload_patterns: |
+        app/build/reports/tests/testDebugUnitTest/
+        app/build/test-results/testDebugUnitTest/
+      cache_read_only: ${{ github.ref != 'refs/heads/main' }}
 
   build:
     name: Build debug APK
-    runs-on: ubuntu-latest
-    needs: test
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      # Re-use the Gradle cache populated by the test job so the build job starts warm.
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug
-
-      # Expose the signed debug APK so it can be downloaded from the Actions summary or
-      # fetched with `gh run download` after a successful run.
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
-          if-no-files-found: error
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: ':app:assembleDebug'
+      artifact_name: app-debug-apk
+      upload_patterns: |
+        app/build/outputs/apk/debug/app-debug.apk
+      cache_read_only: ${{ github.ref != 'refs/heads/main' }}
