@@ -1,0 +1,22 @@
+# Android Lint — on-demand lint sweep (opt-in; not part of the merge gate).
+# Dispatch via `gh workflow run "Android Lint" --ref <branch>` or the Actions UI.
+name: Android Lint
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Optional branch/tag/SHA to lint (default: triggering ref)'
+        required: false
+        default: ''
+
+jobs:
+  lint:
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: ':app:lintDebug'
+      ref: ${{ inputs.ref }}
+      artifact_name: lint-report
+      upload_patterns: |
+        app/build/reports/lint-results-debug.html
+        app/build/reports/lint-results-debug.txt

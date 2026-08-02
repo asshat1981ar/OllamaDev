@@ -1,0 +1,24 @@
+# Roborazzi Screenshots — record real, anti-aliased UI screenshots on an x86_64 runner.
+#
+# The local aarch64 container cannot render real Robolectric pixels (no native-graphics
+# stack), so screenshot recording is delegated here; the PNGs are uploaded as an artifact
+# and can be pulled back with `gh run download` or scripts/delegate-build.sh.
+name: Roborazzi Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Optional branch/tag/SHA to record screenshots from (default: triggering ref)'
+        required: false
+        default: ''
+
+jobs:
+  record:
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: ':app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest'
+      ref: ${{ inputs.ref }}
+      artifact_name: roborazzi-screens
+      upload_patterns: |
+        app/build/outputs/roborazzi-screens/**/*.png
