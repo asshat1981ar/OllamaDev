@@ -1,0 +1,44 @@
+name: Dependency scan
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 4 * * 0' # weekly on Sundays at 04:00 UTC
+
+jobs:
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Grant execute for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Run OWASP dependency-check
+        uses: owasp/dependency-check-action@v2
+        with:
+          project: "OllamaDev"
+          scan: "./"
+          format: "ALL"
+          suppression-file: ""
+          fail-on: "never"
+
+      - name: Upload dependency-check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-reports
+          path: dependency-check-report*/**
+          if-no-files-found: warn
