@@ -12,7 +12,15 @@ import okhttp3.Response
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-private const val MCP_PROTOCOL_VERSION = "2025-06-18"
+private const val LEGACY_PROTOCOL_VERSION = "2025-06-18"
+private const val MODERN_PROTOCOL_VERSION = "2026-07-28"
+
+private const val META_PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
+private const val META_CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
+
+private val CLIENT_CAPABILITIES = emptyMap<String, Any?>()
+
+private const val MCP_METHOD_HEADER = "mcp-method"
 
 data class McpSession(val sessionId: String?, val protocolVersion: String)
 data class McpTool(
@@ -26,8 +34,15 @@ data class McpTool(
 /**
  * Minimal MCP Streamable HTTP client (https://modelcontextprotocol.io). Android apps can't
  * spawn local stdio MCP servers, so this only supports remote/hosted servers reachable over
- * HTTP(S). Handles both a single application/json response and a text/event-stream response
- * (reads until the SSE event carrying the matching JSON-RPC response id arrives).
+ * HTTP(S).
+ *
+ * This client now handles both protocol transports:
+ * - **Legacy (2025-06-18):** `initialize` handshake + `notifications/initialized`, per-request
+ *   `Mcp-Session-Id` header.
+ * - **Modern (2026-07-28):** no handshake; every request carries `MCP-Protocol-Version`,
+ *   `mcp-method`, and a `_meta` envelope with protocol version and client capabilities.
+ *
+ * The transport is auto-detected during [initialize].
  */
 class McpClient : McpClientInterface {
     private val moshi = Moshi.Builder().build()
@@ -37,9 +52,26 @@ class McpClient : McpClientInterface {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .build()
+
+    /** True when the negotiated session uses the modern 2026-07-28 transport. */
+    private fun isModern(session: McpSession?): Boolean =
+        session?.protocolVersion == MODERN_PROTOCOL_VERSION
+
+    /** Build the `_meta` envelope required by the modern streamable HTTP transport. */
+    private fun modernMeta(): Map<String, Any?> = mapOf(
+        META_PROTOCOL_VERSION_KEY to MODERN_PROTOCOL_VERSION,
+        META_CLIENT_CAPABILITIES_KEY to CLIENT_CAPABILITIES
+    )
+
+    /** Inject the `_meta` envelope into modern request params. */
+    private fun paramsWithMeta(params: Map<String, Any?>?): Map<String, Any?> {
+        if (params == null) return mapOf("_meta" to modernMeta())
+        if (params.containsKey("_meta")) return params
+        return params + ("_meta" to modernMeta())
+    }
 
     private fun buildRequest(
         serverUrl: String,
@@ -49,9 +81,12 @@ class McpClient : McpClientInterface {
         authToken: String?,
         requestId: Long?
     ): Request {
+        val protocolVersion = session?.protocolVersion ?: LEGACY_PROTOCOL_VERSION
+        val modern = isModern(session)
+
         val envelope = mutableMapOf<String, Any?>("jsonrpc" to "2.0", "method" to method)
         if (requestId != null) envelope["id"] = requestId
-        if (params != null) envelope["params"] = params
+        envelope["params"] = if (modern) paramsWithMeta(params) else (params ?: emptyMap())
 
         val json = jsonObjectAdapter.toJson(envelope)
         val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -61,12 +96,34 @@ class McpClient : McpClientInterface {
             .post(body)
             .addHeader("Accept", "application/json, text/event-stream")
             .addHeader("Content-Type", "application/json")
-            .addHeader("MCP-Protocol-Version", session?.protocolVersion ?: MCP_PROTOCOL_VERSION)
+            .addHeader("MCP-Protocol-Version", protocolVersion)
+        if (modern) {
+            builder.addHeader(MCP_METHOD_HEADER, method)
+        }
         session?.sessionId?.let { builder.addHeader("Mcp-Session-Id", it) }
         if (!authToken.isNullOrBlank()) {
             builder.addHeader("Authorization", "Bearer $authToken")
         }
         return builder.build()
+    }
+
+    /** Build a `tools/call` request. Extracted so the tool name can be sent as `mcp-name` header. */
+    private fun buildToolCallRequest(
+        serverUrl: String,
+        method: String,
+        params: Map<String, Any?>,
+        session: McpSession,
+        authToken: String?,
+        requestId: Long,
+        toolName: String
+    ): Request {
+        val request = buildRequest(serverUrl, method, params, session, authToken, requestId)
+        if (isModern(session)) {
+            return request.newBuilder()
+                .addHeader("mcp-name", toolName)
+                .build()
+        }
+        return request
     }
 
     /** Parses either a single JSON body or an SSE stream, returning the response matching [expectedId]. */
@@ -104,16 +161,41 @@ class McpClient : McpClientInterface {
         return error["message"] as? String ?: "Unknown MCP error"
     }
 
-    override suspend fun initialize(serverUrl: String, authToken: String?): Result<McpSession> =
+    /**
+     * Extract a human-readable string from a tool result. Modern (2026-07-28) servers return
+     * a `content` list of text objects; legacy servers often return the result directly.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun extractToolResult(result: Any?): String {
+        if (result == null) return ""
+        if (result is String) return result
+        val resultMap = result as? Map<String, Any?> ?: return result.toString()
+        val content = resultMap["content"] as? List<Map<String, Any?>>
+        if (!content.isNullOrEmpty()) {
+            return content
+                .filter { it["type"] == "text" }
+                .joinToString("\n") { it["text"]?.toString() ?: "" }
+        }
+        return result.toString()
+    }
+
+    /**
+     * Probe the server with a modern `tools/list` request (no initialize handshake).
+     * Returns a modern session if the server speaks 2026-07-28.
+     */
+    private suspend fun tryModernConnect(serverUrl: String, authToken: String?): Result<McpSession> =
         withContext(Dispatchers.IO) {
             try {
                 val requestId = idCounter.getAndIncrement()
-                val params = mapOf(
-                    "protocolVersion" to MCP_PROTOCOL_VERSION,
-                    "capabilities" to emptyMap<String, Any?>(),
-                    "clientInfo" to mapOf("name" to "OllamaDev", "version" to "1.0")
+                val params = mapOf("_meta" to modernMeta())
+                val request = buildRequest(
+                    serverUrl,
+                    "tools/list",
+                    params,
+                    McpSession(null, MODERN_PROTOCOL_VERSION),
+                    authToken,
+                    requestId
                 )
-                val request = buildRequest(serverUrl, "initialize", params, null, authToken, requestId)
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         return@use Result.failure<McpSession>(IllegalStateException("HTTP ${response.code}"))
@@ -124,7 +206,44 @@ class McpClient : McpClientInterface {
                     if (error != null) {
                         return@use Result.failure<McpSession>(IllegalStateException(error))
                     }
-                    val session = McpSession(sessionId, MCP_PROTOCOL_VERSION)
+                    Result.success(McpSession(sessionId, MODERN_PROTOCOL_VERSION))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    /**
+     * Perform the legacy `initialize` handshake and notify the server that the client is initialized.
+     */
+    private suspend fun tryLegacyConnect(serverUrl: String, authToken: String?): Result<McpSession> =
+        withContext(Dispatchers.IO) {
+            try {
+                val requestId = idCounter.getAndIncrement()
+                val params = mapOf(
+                    "protocolVersion" to LEGACY_PROTOCOL_VERSION,
+                    "capabilities" to emptyMap<String, Any?>(),
+                    "clientInfo" to mapOf("name" to "OllamaDev", "version" to "1.0")
+                )
+                val request = buildRequest(
+                    serverUrl,
+                    "initialize",
+                    params,
+                    McpSession(null, LEGACY_PROTOCOL_VERSION),
+                    authToken,
+                    requestId
+                )
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@use Result.failure<McpSession>(IllegalStateException("HTTP ${response.code}"))
+                    }
+                    val sessionId = response.header("Mcp-Session-Id")
+                    val parsed = parseResponse(response, requestId)
+                    val error = extractError(parsed)
+                    if (error != null) {
+                        return@use Result.failure<McpSession>(IllegalStateException(error))
+                    }
+                    val session = McpSession(sessionId, LEGACY_PROTOCOL_VERSION)
                     notifyInitialized(serverUrl, session, authToken)
                     Result.success(session)
                 }
@@ -133,7 +252,26 @@ class McpClient : McpClientInterface {
             }
         }
 
+    override suspend fun initialize(serverUrl: String, authToken: String?): Result<McpSession> =
+        withContext(Dispatchers.IO) {
+            // Modern transport first: if the server replies to a tools/list probe with the
+            // required 2026-07-28 envelope, use it. Otherwise fall back to the legacy handshake.
+            val modernResult = tryModernConnect(serverUrl, authToken)
+            if (modernResult.isSuccess) {
+                return@withContext modernResult
+            }
+            val legacyResult = tryLegacyConnect(serverUrl, authToken)
+            if (legacyResult.isSuccess) {
+                return@withContext legacyResult
+            }
+            // Surface the legacy error as the more informative failure for older servers.
+            legacyResult
+        }
+
     override suspend fun notifyInitialized(serverUrl: String, session: McpSession, authToken: String?) {
+        // Modern transport has no initialized notification; skip silently.
+        if (isModern(session)) return
+
         withContext(Dispatchers.IO) {
             try {
                 val request = buildRequest(serverUrl, "notifications/initialized", null, session, authToken, null)
@@ -144,11 +282,16 @@ class McpClient : McpClientInterface {
         }
     }
 
-    override suspend fun listTools(serverUrl: String, session: McpSession, authToken: String?): Result<List<McpTool>> =
+    override suspend fun listTools(
+        serverUrl: String,
+        session: McpSession,
+        authToken: String?
+    ): Result<List<McpTool>> =
         withContext(Dispatchers.IO) {
             try {
                 val requestId = idCounter.getAndIncrement()
-                val request = buildRequest(serverUrl, "tools/list", emptyMap(), session, authToken, requestId)
+                val baseParams = if (isModern(session)) emptyMap() else emptyMap<String, Any?>()
+                val request = buildRequest(serverUrl, "tools/list", baseParams, session, authToken, requestId)
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         return@use Result.failure<List<McpTool>>(IllegalStateException("HTTP ${response.code}"))
@@ -189,7 +332,15 @@ class McpClient : McpClientInterface {
         try {
             val requestId = idCounter.getAndIncrement()
             val params = mapOf("name" to toolName, "arguments" to arguments)
-            val request = buildRequest(serverUrl, "tools/call", params, session, authToken, requestId)
+            val request = buildToolCallRequest(
+                serverUrl,
+                "tools/call",
+                params,
+                session,
+                authToken,
+                requestId,
+                toolName
+            )
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     return@use Result.failure<String>(IllegalStateException("HTTP ${response.code}"))
@@ -199,7 +350,7 @@ class McpClient : McpClientInterface {
                 if (error != null) {
                     return@use Result.failure<String>(IllegalStateException(error))
                 }
-                Result.success(parsed["result"]?.toString() ?: "")
+                Result.success(extractToolResult(parsed["result"]))
             }
         } catch (e: Exception) {
             Result.failure(e)

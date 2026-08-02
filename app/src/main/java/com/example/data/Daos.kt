@@ -101,7 +101,7 @@ interface WorkspaceFileDao {
     @Query("SELECT * FROM workspace_files WHERE id = :id")
     suspend fun getFileById(id: Int): WorkspaceFile?
 
-    @Query("SELECT * FROM workspace_files WHERE filePath = :filePath")
+    @Query("SELECT * FROM workspace_files WHERE filePath = :filePath ORDER BY id DESC LIMIT 1")
     suspend fun getFileByPath(filePath: String): WorkspaceFile?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

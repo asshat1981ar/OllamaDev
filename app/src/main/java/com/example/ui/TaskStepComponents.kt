@@ -99,7 +99,7 @@ fun HistoryTaskRow(
 private fun stepIconAndColorFor(actionType: String): Pair<androidx.compose.ui.graphics.vector.ImageVector, Color> = when (actionType.uppercase()) {
     "THINKING", "PLAN" -> Icons.Rounded.Psychology to Color(0xFF9C27B0)
     "OUTPUT" -> Icons.AutoMirrored.Rounded.ShortText to Color(0xFF2196F3)
-    "VERIFYING", "EXEC_RESULT" -> Icons.Rounded.FactCheck to Color(0xFF009688)
+    "VERIFYING", "EXEC_RESULT" -> Icons.AutoMirrored.Rounded.FactCheck to Color(0xFF009688)
     "EXEC_RESULT_FAILED", "MCP_CALL_FAILED", "ACTION_DECLINED", "FILE_CHANGE_REJECTED",
     "GIT_COMMIT_FAILED", "GIT_PUSH_FAILED", "BUDGET_HALT" -> Icons.Rounded.Error to Color(0xFFEF4444)
     "MCP_TOOL_CALL", "MCP_CALL_GATED" -> Icons.Rounded.Memory to Color(0xFFFF9800)

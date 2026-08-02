@@ -27,7 +27,7 @@ Already present in this container — nothing to install:
   start an emulator here, it cannot work in this container (verified: no `emulator`
   binary under the SDK, `avdmanager list avd` returns empty, no KVM device node).
 - `./gradlew` is executable and already has Gradle 9.3.1 downloaded in `~/.gradle/wrapper/dists`.
-- `.env` already exists at repo root (real `GEMINI_API_KEY`/`OLLAMA_API_KEY`, gitignored).
+- `.env` already exists at repo root (real `OLLAMA_API_KEY`, gitignored).
   If it's ever missing, copy `.env.example` — the Secrets Gradle Plugin
   (`app/build.gradle.kts`) falls back to it and `googleServices.missingGoogleServicesStrategy = WARN`
   means a missing `google-services.json` doesn't fail the build either.

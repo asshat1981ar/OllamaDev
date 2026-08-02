@@ -17,6 +17,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.*
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -354,6 +355,10 @@ class SwarmViewModel(
                     availableModels = models
                 )
             )
+            AnalyticsTracker.track(
+                "node_connection_tested",
+                mapOf("success" to isOnline, "latency_ms" to latency)
+            )
         }
     }
 
@@ -484,6 +489,19 @@ class SwarmViewModel(
             }
             connectMcpServer(id, sourceUrl, type, authToken.ifBlank { null })
         }
+    }
+
+    /**
+     * Add the local OllamaDev companion MCP server. The companion server uses the modern
+     * streamable HTTP transport and exposes filesystem/code/build tools for the workspace.
+     */
+    fun addOllamaDevCompanionServer() {
+        addMcpServer(
+            name = "OllamaDev Tools",
+            type = "Filesystem",
+            sourceUrl = "http://10.0.2.2:5000/mcp",
+            configuredParams = "{\"workspace\":\"/home/userland/OllamaDev\"}"
+        )
     }
 
     fun updateMcpServer(server: McpServer) {
@@ -674,6 +692,10 @@ class SwarmViewModel(
     fun runSwarm(config: SwarmConfig, prompt: String) {
         viewModelScope.launch {
             _isExecutingTask.value = true
+            AnalyticsTracker.track(
+                "prompt_sent",
+                mapOf("source" to "manual", "prompt_length" to prompt.length)
+            )
             swarmEngine.executeTask(config, prompt, onTaskCreated = { id -> _selectedTaskId.value = id })
             _isExecutingTask.value = false
         }
@@ -716,6 +738,10 @@ class SwarmViewModel(
         val config = _selectedSessionSwarmConfig.value ?: allSwarmConfigs.value.firstOrNull() ?: return
         viewModelScope.launch {
             _isExecutingTask.value = true
+            AnalyticsTracker.track(
+                "prompt_sent",
+                mapOf("source" to "session", "prompt_length" to prompt.length)
+            )
             _sessionInputHistory.value = (_sessionInputHistory.value + prompt).takeLast(50)
 
             val recentMessages = db.chatMessageDao().getRecentMessagesSync(20).sortedBy { it.timestamp }
@@ -755,6 +781,10 @@ class SwarmViewModel(
                 return@launch
             }
             _isExecutingTask.value = true
+            AnalyticsTracker.track(
+                "prompt_sent",
+                mapOf("source" to "background", "prompt_length" to prompt.length)
+            )
             com.example.service.AgenticLoopService.startAgenticLoop(getApplication(), config, prompt)
             _isExecutingTask.value = false
         }
@@ -921,6 +951,28 @@ class SwarmViewModel(
     private val _gitError = MutableStateFlow<String?>(null)
     val gitError: StateFlow<String?> = _gitError.asStateFlow()
 
+    // MCP Workspace Browser state
+    private val _workspaceBrowserFiles = MutableStateFlow<List<String>>(emptyList())
+    val workspaceBrowserFiles: StateFlow<List<String>> = _workspaceBrowserFiles.asStateFlow()
+
+    private val _selectedWorkspaceFile = MutableStateFlow<String?>(null)
+    val selectedWorkspaceFile: StateFlow<String?> = _selectedWorkspaceFile.asStateFlow()
+
+    private val _workspaceFileContent = MutableStateFlow("")
+    val workspaceFileContent: StateFlow<String> = _workspaceFileContent.asStateFlow()
+
+    private val _selectedWorkspaceServerId = MutableStateFlow<Int?>(null)
+    val selectedWorkspaceServerId: StateFlow<Int?> = _selectedWorkspaceServerId.asStateFlow()
+
+    private val _isWorkspaceLoading = MutableStateFlow(false)
+    val isWorkspaceLoading: StateFlow<Boolean> = _isWorkspaceLoading.asStateFlow()
+
+    private val _workspaceError = MutableStateFlow<String?>(null)
+    val workspaceError: StateFlow<String?> = _workspaceError.asStateFlow()
+
+    private val _workspaceFileOutline = MutableStateFlow("")
+    val workspaceFileOutline: StateFlow<String> = _workspaceFileOutline.asStateFlow()
+
     private fun computeGitSyncState() {
         val lastPushedHash = prefs.getString("git_last_pushed_hash", null)
         _isGitSynced.value = gitService.isClean() && gitService.localHeadHash() == lastPushedHash
@@ -1077,6 +1129,238 @@ class SwarmViewModel(
     fun uploadFile(filePath: String, content: String) {
         viewModelScope.launch {
             createFile(filePath, content)
+        }
+    }
+
+    /** Selects the filesystem MCP server used by the workspace browser. */
+    fun selectWorkspaceServer(serverId: Int) {
+        _selectedWorkspaceServerId.value = serverId
+        _workspaceBrowserFiles.value = emptyList()
+        _selectedWorkspaceFile.value = null
+        _workspaceFileContent.value = ""
+        _workspaceError.value = null
+    }
+
+    /** Lists files from the connected filesystem MCP server, optionally filtered by [query]. */
+    @Suppress("UNCHECKED_CAST")
+    fun loadWorkspaceFiles(serverId: Int, query: String = "") {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: run {
+                    _workspaceError.value = "Server not found"
+                    return@launch
+                }
+                if (server.status != "Connected") {
+                    _workspaceError.value = "Server is not connected"
+                    return@launch
+                }
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val listType = Types.newParameterizedType(List::class.java, String::class.java)
+                val listAdapter = moshi.adapter<List<String>>(listType)
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(server.sourceUrl, session, authToken, "list_workspace_files", emptyMap())
+                }
+                result.fold(
+                    onSuccess = { json ->
+                        try {
+                            val files = listAdapter.fromJson(json)
+                                ?.filter { query.isBlank() || it.contains(query, ignoreCase = true) }
+                                ?: emptyList()
+                            _workspaceBrowserFiles.value = files
+                            if (_selectedWorkspaceFile.value !in files) {
+                                _selectedWorkspaceFile.value = null
+                            }
+                        } catch (e: Exception) {
+                            // Defensive: a server returning malformed JSON shouldn't crash the coroutine.
+                            _workspaceError.value = e.localizedMessage ?: "Failed to parse file list"
+                        }
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to list files"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
+    /** Reads the contents of [path] from the connected filesystem MCP server. */
+    fun readWorkspaceFile(serverId: Int, path: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(server.sourceUrl, session, authToken, "read_workspace_file", mapOf("path" to path))
+                }
+                result.fold(
+                    onSuccess = { content ->
+                        _selectedWorkspaceFile.value = path
+                        _workspaceFileContent.value = content
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to read file"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
+    /** Writes [content] back to [path] through the connected filesystem MCP server. */
+    fun saveWorkspaceFile(serverId: Int, path: String, content: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(
+                        server.sourceUrl,
+                        session,
+                        authToken,
+                        "write_workspace_file",
+                        mapOf("path" to path, "content" to content, "create_dirs" to true)
+                    )
+                }
+                result.fold(
+                    onSuccess = {
+                        _workspaceFileContent.value = content
+                        _workspaceError.value = null
+                        _voiceFeedback.value = "Saved $path"
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to save file"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
+    /** Creates a new empty file at [path] through the connected filesystem MCP server. */
+    fun createWorkspaceFile(serverId: Int, path: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(
+                        server.sourceUrl,
+                        session,
+                        authToken,
+                        "write_workspace_file",
+                        mapOf("path" to path, "content" to "", "create_dirs" to true)
+                    )
+                }
+                result.fold(
+                    onSuccess = {
+                        _voiceFeedback.value = "Created $path"
+                        loadWorkspaceFiles(serverId)
+                        readWorkspaceFile(serverId, path)
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to create file"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
+    /** Deletes [path] through the connected filesystem MCP server. */
+    fun deleteWorkspaceFile(serverId: Int, path: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(server.sourceUrl, session, authToken, "delete_workspace_file", mapOf("path" to path))
+                }
+                result.fold(
+                    onSuccess = {
+                        _voiceFeedback.value = "Deleted $path"
+                        if (_selectedWorkspaceFile.value == path) {
+                            _selectedWorkspaceFile.value = null
+                            _workspaceFileContent.value = ""
+                        }
+                        loadWorkspaceFiles(serverId)
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to delete file"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
+    /** Loads the file outline for [path] from the connected filesystem MCP server. */
+    fun loadFileOutline(serverId: Int, path: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(server.sourceUrl, session, authToken, "get_file_outline", mapOf("path" to path))
+                }
+                result.fold(
+                    onSuccess = { outline ->
+                        _workspaceFileOutline.value = outline
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to load outline"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
         }
     }
 

@@ -43,6 +43,7 @@ googleid = "1.1.1"
 jgit = "6.7.0.202309050840-r"
 securityCrypto = "1.1.0"
 desugarJdkLibs = "2.1.4"
+mixpanelAndroid = "7.5.2"
 
 
 [libraries]
@@ -102,6 +103,7 @@ googleid = { group = "com.google.android.libraries.identity.googleid", name = "g
 jgit = { group = "org.eclipse.jgit", name = "org.eclipse.jgit", version.ref = "jgit" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
+mixpanel-android = { group = "com.mixpanel.android", name = "mixpanel-android", version.ref = "mixpanelAndroid" }
 
 
 [plugins]

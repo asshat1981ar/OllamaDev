@@ -38,7 +38,10 @@ class McpServerAndRegistryTest : UiTestBase() {
         composeRule.onNodeWithText("Test Postgres").performScrollTo().assertIsDisplayed()
         // The app never renders the literal string "Connected" -- the connect button's own label
         // flips from "Connect" to "Disconnect" once server.status == "Connected" (McpSkillsScreen.kt:561).
-        composeRule.onNodeWithText("Disconnect").performScrollTo().assertIsDisplayed()
+        // Use the server-specific tag because the seeded "OllamaDev Tools" Filesystem server is also
+        // Connected by default, which would make a bare "Disconnect" text query ambiguous.
+        val postgresId = viewModel.mcpServers.value.first { it.name == "Test Postgres" }.id
+        composeRule.onNodeWithTag("connect_server_button_$postgresId").performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithTag("browse_registry_button").performScrollTo().performClick()
         advanceUntilIdle()

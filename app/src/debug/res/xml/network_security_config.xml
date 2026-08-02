@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only (merged via app/src/debug/AndroidManifest.xml). Ollama nodes are
+  commonly plain HTTP on the emulator host alias (10.0.2.2) or an arbitrary LAN IP typed
+  into the Nodes screen, so cleartext is permitted broadly here rather than enumerating
+  hosts. Release builds get the platform default (cleartext blocked) since this file is
+  never merged into a release variant. Only point a debug build at Ollama servers on
+  networks you trust.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

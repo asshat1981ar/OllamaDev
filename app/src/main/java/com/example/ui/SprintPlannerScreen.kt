@@ -10,7 +10,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.FactCheck
 import androidx.compose.material.icons.automirrored.rounded.MergeType
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -401,7 +403,7 @@ private fun ActivePhaseCard(
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.OpenInNew,
+                        imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp)
                     )
@@ -557,7 +559,7 @@ private fun ArtifactCard(
                         onClick = { onNavigateToSession(artifact.taskId) },
                         contentPadding = PaddingValues(0.dp)
                     ) {
-                        Icon(Icons.Rounded.OpenInNew, null, Modifier.size(14.dp))
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("View task #${artifact.taskId}", style = MaterialTheme.typography.labelSmall)
                     }
@@ -571,7 +573,7 @@ private fun phaseIcon(phase: SprintPhase): ImageVector = when (phase) {
     SprintPhase.DISCOVERY     -> Icons.Rounded.Search
     SprintPhase.DESIGN        -> Icons.Rounded.Architecture
     SprintPhase.IMPLEMENTATION -> Icons.Rounded.Code
-    SprintPhase.VERIFICATION  -> Icons.Rounded.FactCheck
+    SprintPhase.VERIFICATION  -> Icons.AutoMirrored.Rounded.FactCheck
     SprintPhase.INTEGRATION   -> Icons.AutoMirrored.Rounded.MergeType
     SprintPhase.RETROSPECTIVE -> Icons.Rounded.History
 }

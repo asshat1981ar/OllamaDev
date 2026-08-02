@@ -5,6 +5,16 @@ CSS, no web bundler, no design-token JSON pipeline. Figma MCP tools that assume 
 React/CSS stack (styled-components, Tailwind, CSS variables) do not apply directly — map
 their concepts onto Compose equivalents as described below.
 
+## Build environment note
+
+The active development environment is an **Android 13 userland container (aarch64)**. The Android SDK build-tools and AGP download x86_64 `aapt2` binaries, which cannot execute natively here. `scripts/setup_aapt2_qemu.sh` installs a static `qemu-x86_64-static` emulator plus a minimal x86_64 glibc sysroot and wraps the SDK/Gradle-cached x86_64 executables so the full Gradle build works. To apply it:
+
+```bash
+./scripts/setup_aapt2_qemu.sh
+```
+
+It also sets `android.aapt2FromMavenOverride` in `~/.gradle/gradle.properties` so AGP uses the wrapped SDK `aapt2` rather than its own extracted Maven artifact. After running it, `:app:assembleDebug` succeeds on this host. If `aapt2` starts failing with "cannot execute", re-run the script (it skips already-wrapped binaries but can repair missing sysroot/QEMU files).
+
 ## 1. Design Tokens
 
 - **Source of truth:** `app/src/main/java/com/example/ui/theme/{Color.kt,Theme.kt,Type.kt}`.
@@ -136,7 +146,7 @@ their concepts onto Compose equivalents as described below.
 app/src/main/java/com/example/
 ├── MainActivity.kt              # entry point, Scaffold + tab switch, MyApplicationTheme root
 ├── CrashLoggingApplication.kt
-├── data/                        # services, Room DB/DAOs/entities, MCP + Ollama/Gemini clients
+├── data/                        # services, Room DB/DAOs/entities, MCP + Ollama clients
 ├── ui/                          # flat: one file per screen, plus theme/
 │   ├── *Screen.kt / *Dialog.kt
 │   └── theme/{Color,Theme,Type}.kt

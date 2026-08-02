@@ -264,6 +264,7 @@ class MainActivity : ComponentActivity() {
                     NavigationItem("session", "Session", Icons.Rounded.Terminal),
                     NavigationItem("sprints", "Sprints", Icons.Rounded.AutoAwesomeMotion),
                     NavigationItem("manage", "Manage", Icons.Rounded.Dashboard),
+                    NavigationItem("workspace", "Workspace", Icons.Rounded.Folder),
                     NavigationItem("analytics", "Analytics", Icons.Rounded.Analytics),
                     NavigationItem("settings", "System", Icons.Rounded.Settings)
                 )
@@ -364,6 +365,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                                 "manage" -> ManageScreen(viewModel = viewModel)
+                                "workspace" -> WorkspaceScreen(viewModel = viewModel)
                                 "analytics" -> AnalyticsScreen(viewModel = viewModel)
                                 "settings" -> SystemConfigScreen(viewModel = viewModel)
                             }

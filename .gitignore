@@ -17,3 +17,7 @@ local.properties
 .env
 debug.keystore
 .worktrees/
+# Local-only runtime artifacts
+ollama.log
+# Downloads from scripts/delegate-build.sh
+ci-artifacts/

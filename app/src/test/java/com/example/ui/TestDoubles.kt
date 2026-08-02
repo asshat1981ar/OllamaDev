@@ -105,6 +105,19 @@ class FakeMcpClient : McpClientInterface {
      *  used to script a passing/failing verify-phase tool result in agentic-loop tests. */
     var scriptedToolResult: String? = null
 
+    /** Per-tool scripted results. Takes precedence over [scriptedToolResult] when a key matches. */
+    val scriptedToolResults = mutableMapOf<String, String>()
+
+    /** Sensible valid-JSON defaults for workspace tools so screens that call them (e.g. the
+     *  Workspace tab reached from navigation) don't blow up parsing non-JSON text when unscripted. */
+    private val defaultToolResults = mapOf(
+        "list_workspace_files" to "[]",
+        "read_workspace_file" to "",
+        "write_workspace_file" to "OK",
+        "delete_workspace_file" to "Deleted",
+        "get_file_outline" to ""
+    )
+
     override suspend fun callTool(
         serverUrl: String,
         session: McpSession,
@@ -114,7 +127,12 @@ class FakeMcpClient : McpClientInterface {
     ): Result<String> = if (shouldFail) {
         Result.failure(IllegalStateException("Fake MCP callTool failure"))
     } else {
-        Result.success(scriptedToolResult ?: "Fake result for $toolName with $arguments")
+        Result.success(
+            scriptedToolResults[toolName]
+                ?: defaultToolResults[toolName]
+                ?: scriptedToolResult
+                ?: "Fake result for $toolName with $arguments"
+        )
     }
 
     override fun toJsonString(value: Map<String, Any?>?): String? {
