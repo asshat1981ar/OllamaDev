@@ -310,7 +310,8 @@ private fun seedMcpServers() = listOf(
     McpServer(id = 3, name = "Private GitHub MCP", type = "GitHub", sourceUrl = "http://localhost:3003/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"repo\":\"owner/repo\"}"),
     McpServer(id = 4, name = "Workspace Postgres", type = "Database", sourceUrl = "http://localhost:3004/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"connectionString\":\"postgresql://localhost:5432/app\"}"),
     McpServer(id = 5, name = "Browser Automation", type = "Browser", sourceUrl = "http://localhost:3005/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{\"headless\":true}"),
-    McpServer(id = 6, name = "OllamaDev Sandbox", type = "Sandbox", sourceUrl = "http://localhost:5000/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{}")
+    McpServer(id = 6, name = "OllamaDev Sandbox", type = "Sandbox", sourceUrl = "http://localhost:5000/mcp", status = "Disconnected", toolsCount = 0, configuredParams = "{}"),
+    McpServer(id = 7, name = "OllamaDev Tools", type = "Filesystem", sourceUrl = "http://localhost:5000/mcp", status = "Connected", toolsCount = 4, configuredParams = "{\"workspace\":\"/home/userland/OllamaDev\"}")
 )
 
 private fun seedClaudeSkills() = listOf(

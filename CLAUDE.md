@@ -136,7 +136,7 @@ their concepts onto Compose equivalents as described below.
 app/src/main/java/com/example/
 ├── MainActivity.kt              # entry point, Scaffold + tab switch, MyApplicationTheme root
 ├── CrashLoggingApplication.kt
-├── data/                        # services, Room DB/DAOs/entities, MCP + Ollama/Gemini clients
+├── data/                        # services, Room DB/DAOs/entities, MCP + Ollama clients
 ├── ui/                          # flat: one file per screen, plus theme/
 │   ├── *Screen.kt / *Dialog.kt
 │   └── theme/{Color,Theme,Type}.kt

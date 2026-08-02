@@ -31,9 +31,9 @@ class MainNavigationTest : UiTestBase() {
 
     @Config(qualifiers = "w360dp-h2400dp")
     @Test
-    fun compactBottomNav_switchesBetweenSessionManageSettings() = runUiTest {
+    fun compactBottomNav_switchesBetweenSessionManageWorkspaceSettings() = runUiTest {
         var activeTab by mutableStateOf("session")
-        val items = listOf("session", "manage", "settings")
+        val items = listOf("session", "manage", "workspace", "settings")
 
         setContent {
             Scaffold(
@@ -55,6 +55,7 @@ class MainNavigationTest : UiTestBase() {
                     when (activeTab) {
                         "session" -> SessionScreen(viewModel)
                         "manage" -> ManageScreen(viewModel)
+                        "workspace" -> WorkspaceScreen(viewModel)
                         "settings" -> SystemConfigScreen(viewModel)
                     }
                 }
@@ -69,6 +70,10 @@ class MainNavigationTest : UiTestBase() {
         advanceUntilIdle()
         composeRule.onNodeWithTag("manage_tab_0").assertIsDisplayed()
 
+        composeRule.onNodeWithTag("nav_bottom_workspace").performClick()
+        advanceUntilIdle()
+        composeRule.onNodeWithTag("workspace_server_selector").assertIsDisplayed()
+
         composeRule.onNodeWithTag("nav_bottom_settings").performClick()
         advanceUntilIdle()
         composeRule.onNodeWithTag("system_tab_0").assertIsDisplayed()
@@ -76,9 +81,9 @@ class MainNavigationTest : UiTestBase() {
 
     @Config(qualifiers = "w800dp-h2400dp")
     @Test
-    fun expandedNavigationRail_switchesBetweenSessionManageSettings() = runUiTest {
+    fun expandedNavigationRail_switchesBetweenSessionManageWorkspaceSettings() = runUiTest {
         var activeTab by mutableStateOf("session")
-        val items = listOf("session", "manage", "settings")
+        val items = listOf("session", "manage", "workspace", "settings")
 
         setContent {
             Scaffold { innerPadding ->
@@ -98,6 +103,7 @@ class MainNavigationTest : UiTestBase() {
                         when (activeTab) {
                             "session" -> SessionScreen(viewModel)
                             "manage" -> ManageScreen(viewModel)
+                            "workspace" -> WorkspaceScreen(viewModel)
                             "settings" -> SystemConfigScreen(viewModel)
                         }
                     }
@@ -112,6 +118,10 @@ class MainNavigationTest : UiTestBase() {
         composeRule.onNodeWithTag("nav_rail_manage").performClick()
         advanceUntilIdle()
         composeRule.onNodeWithTag("manage_tab_0").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("nav_rail_workspace").performClick()
+        advanceUntilIdle()
+        composeRule.onNodeWithTag("workspace_server_selector").assertIsDisplayed()
 
         composeRule.onNodeWithTag("nav_rail_settings").performClick()
         advanceUntilIdle()

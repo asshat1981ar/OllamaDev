@@ -14,7 +14,7 @@ android {
   compileSdk = 34
 
   defaultConfig {
-    applicationId = "com.aistudio.ollamaswarm.kdxjpq"
+    applicationId = "com.ollamaswarm.app"
     minSdk = 24
     targetSdk = 34
     versionCode = 1
@@ -30,12 +30,6 @@ android {
       storePassword = System.getenv("STORE_PASSWORD")
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
     }
   }
 
@@ -116,7 +110,8 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
-  implementation(libs.firebase.ai)
+  // Gemini/Firebase AI Logic SDK — unused; app resolves all generation against Ollama nodes.
+  // implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
 
@@ -136,6 +131,7 @@ dependencies {
   // implementation(libs.play.services.location)
   implementation(libs.jgit)
   implementation(libs.androidx.security.crypto)
+  implementation(libs.mixpanel.android)
   coreLibraryDesugaring(libs.desugar.jdk.libs)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

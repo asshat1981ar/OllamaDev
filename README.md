@@ -1,21 +1,61 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Ollama Swarm (OllamaDev)
 
-# Run and deploy your AI Studio app
+A native Android app (Jetpack Compose, Kotlin, Material 3) for orchestrating a swarm of
+AI agents against your own **Ollama** servers — running locally, on your LAN, or via
+Ollama Cloud. No Gemini or other cloud AI Studio dependency: every generation call
+resolves against an Ollama node you configure in the app.
 
-This contains everything you need to run your app locally.
+## Requirements
 
-View your app in AI Studio: https://ai.studio/apps/5dbc20b1-fe5f-49cf-94b5-8d788a3080a6
+- [Android Studio](https://developer.android.com/studio)
+- [Ollama](https://ollama.com) running locally or reachable on your network
+- At least one model pulled in that Ollama instance
 
-## Run Locally
+## Setting up Ollama
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+```bash
+ollama serve
+ollama pull llama3.1
+```
 
+By default Ollama listens on `11434`. Once it's running and a model is pulled, add it
+as a node inside the app (Nodes screen):
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+| Where the app runs        | Ollama node URL                          |
+| -------------------------- | ----------------------------------------- |
+| Android emulator            | `http://10.0.2.2:11434`                  |
+| Physical device (same LAN) | `http://<your-computer-lan-ip>:11434`    |
+
+`10.0.2.2` is the emulator's special alias back to the host machine's `localhost`. For a
+physical device, use your computer's actual LAN IP (`ipconfig getifaddr en0` on macOS,
+`ip addr` on Linux) — the device and the Ollama host must be on the same network.
+
+Optionally, point a node at `https://ollama.com` and put a Bearer key in `.env` (see
+`.env.example`) to use Ollama Cloud instead of/alongside a local server. **No Gemini API
+key is required anywhere in this app.**
+
+## Run locally
+
+1. Open Android Studio.
+2. Select **Open** and choose the directory containing this project.
+3. Allow Android Studio to sync/fix any incompatibilities as it imports the project.
+4. Start Ollama and pull a model (see above).
+5. Run the app on an emulator or physical device, then add your Ollama node from the
+   Nodes screen using the table above.
+
+## Troubleshooting
+
+- **Node shows offline / connection refused** — make sure `ollama serve` is running and
+  reachable from the device: `curl http://<node-url>/api/tags` from a machine on the
+  same network as the emulator/device should list your pulled models.
+- **Wrong host/IP** — from the emulator, `localhost`/`127.0.0.1` refers to the emulator
+  itself, not your computer; use `10.0.2.2`. From a physical device, `10.0.2.2` doesn't
+  resolve to anything useful; use your computer's real LAN IP, and confirm both are on
+  the same Wi-Fi/network with no client isolation.
+- **Cleartext HTTP blocked** — Android blocks plaintext `http://` traffic by default on
+  release builds. Debug builds in this project permit cleartext for local development
+  (see `app/src/debug/res/xml/network_security_config.xml`); a release build talking to
+  a non-HTTPS Ollama server would need the same treatment applied deliberately.
+- **Model not found / not pulled** — run `ollama pull <model>` on the machine hosting
+  Ollama, then re-check `http://<node-url>/api/tags` for it before selecting it in the
+  app.

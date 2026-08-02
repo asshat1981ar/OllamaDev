@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Process
 import android.provider.MediaStore
 import android.util.Log
+import com.example.data.AnalyticsTracker
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.text.SimpleDateFormat
@@ -17,6 +18,8 @@ class CrashLoggingApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AnalyticsTracker.init(this)
+        AnalyticsTracker.track("app_opened")
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
