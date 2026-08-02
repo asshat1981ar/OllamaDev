@@ -1,16 +1,39 @@
+# This workflow previously ran on push/pull_request to `main`, which duplicated the
+# primary Android CI gate (android-ci.yml). To avoid duplicate CI runs, this file was
+# converted to a reusable workflow that can be invoked via `workflow_call` from other
+# workflows or manually. android-ci.yml remains the PR merge gate.
+#
+# Example usage from another workflow:
+#   uses: ./.github/workflows/ci.yml
+#   with:
+#     task: ':app:assembleDebug :app:lint :app:test'
+#     artifact_name: 'ci-build-outputs'
+#
 name: CI
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_call:
+    inputs:
+      task:
+        required: true
+        type: string
+      artifact_name:
+        required: false
+        type: string
+      cache_read_only:
+        required: false
+        type: boolean
+        default: true
+      timeout_minutes:
+        required: false
+        type: number
+        default: 60
 
 jobs:
   run-gradle-tasks:
     uses: ./.github/workflows/gradle-task.yml
     with:
-      task: ":app:assembleDebug :app:lint :app:test"
-      artifact_name: "ci-build-outputs"
-      cache_read_only: true
-      timeout_minutes: 60
+      task: ${{ inputs.task }}
+      artifact_name: ${{ inputs.artifact_name }}
+      cache_read_only: ${{ inputs.cache_read_only }}
+      timeout_minutes: ${{ inputs.timeout_minutes }}
