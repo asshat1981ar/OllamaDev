@@ -27,13 +27,15 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Run OWASP dependency-check
-        uses: owasp/dependency-check-action@v2
-        with:
-          project: "OllamaDev"
-          scan: "./"
-          format: "ALL"
-          suppression-file: ""
-          fail-on: "never"
+        run: |
+          set -e
+          echo "Fetching latest dependency-check CLI version"
+          VERSION=$(curl -s https://dependency-check.github.io/DependencyCheck/current.txt)
+          echo "Using dependency-check version $VERSION"
+          curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" -o dependency-check.zip
+          unzip -q dependency-check.zip -d dependency-check
+          chmod +x ./dependency-check/bin/dependency-check.sh
+          ./dependency-check/bin/dependency-check.sh --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report || true
 
       - name: Upload dependency-check reports
         if: always()
