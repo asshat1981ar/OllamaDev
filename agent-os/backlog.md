@@ -211,6 +211,32 @@ Designed in `agent-os/product/specs/10-remote-build-delegation.md`.
       default-branch visibility constraint (new workflows can't be dispatched until they
       land on `main`): falls back to the standard `Android CI` gate for the default task,
       with guidance otherwise.
+
+---
+
+## Tier 7 — CI delegation strategies (new, spec 11)
+
+Parallelize the merge gate and make every gradle/job delegate through one reusable runner,
+per `agent-os/product/specs/11-ci-delegation-strategies.md`.
+
+- [x] **7a. Reusable gradle runner.** `.github/workflows/gradle-task.yml` (`workflow_call`):
+      checkout → JDK 17 → `gradle/actions/setup-gradle@v3` → run task → upload outputs
+      (`if: always()`). Inputs: `task`, `ref`, `artifact_name`, `upload_patterns`,
+      `cache_read_only`, `timeout_minutes`. All other workflows call it.
+- [x] **7b. Parallel gate.** `android-ci.yml` runs the unit suite as three matrix shards
+      (`ui` / `data` / `rest`) concurrently with `:app:assembleDebug` (no `needs: test`);
+      gate wall-clock ≈ max(test, build) instead of test + build.
+- [x] **7c. New delegation targets.** `Roborazzi Screenshots` (real PNGs, impossible locally),
+      `Nightly Maintenance` (`cron 0 3 * * *`: test + build + lint on main), `Android Lint`
+      (dispatch-only), and `Remote Build Delegation` refactored onto the reusable runner
+      (same interface, so `delegate-build.sh` is unchanged).
+- [x] **7d. Local cache warm-up.** `scripts/pull-gradle-cache.sh` restores the
+      arch-independent parts of the main-branch gradle cache (`caches/modules-2`, wrapper
+      dists) into `~/.gradle` via the `gh-actions-cache` extension; skips x86_64-only
+      compiled caches.
+- [x] **7e. Spec + docs.** `specs/11-ci-delegation-strategies.md` documents the design,
+      tradeoffs, verification commands, and deferred items (issue-driven task queue,
+      devcontainer, larger/self-hosted runners, other CI providers).
 - [x] **6c. On-demand merge gate.** Added `workflow_dispatch:` to `android-ci.yml` so the
       standard `test` + `build` jobs can be re-run on any branch without a PR.
 - [x] **6d. Spec + docs.** `agent-os/product/specs/10-remote-build-delegation.md` documents
