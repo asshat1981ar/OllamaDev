@@ -4,6 +4,7 @@ import com.example.ui.FakeAppDatabase
 import com.example.ui.FakeSecurePrefs
 import com.example.ui.FakeOllamaService
 import com.example.ui.FakeMcpClient
+import java.nio.file.Files
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -172,7 +173,7 @@ class SprintOrchestratorTest {
         // db.swarmTaskDao().insertTask() — the engine's executeTask is never invoked.
         val engine = SwarmEngine(
             db = db,
-            gitService = GitService(createTempDir("sprint_test_git")),
+            gitService = GitService(Files.createTempDirectory("sprint_test_git").toFile()),
             mcpClient = FakeMcpClient(),
             appContext = appContext,
             securePrefs = FakeSecurePrefs(),
