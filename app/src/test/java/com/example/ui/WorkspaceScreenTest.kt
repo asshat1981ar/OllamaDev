@@ -50,4 +50,32 @@ class WorkspaceScreenTest : UiTestBase() {
         composeRule.onNodeWithTag("workspace_file_item_app/src/main/java/com/example/MainActivity.kt").assertIsDisplayed()
         composeRule.onNodeWithTag("workspace_editor_textarea").assertIsDisplayed()
     }
+
+    @Config(qualifiers = "w360dp-h6000dp")
+    @Test
+    fun workspaceScreen_createFileButtonOpensDialog() = runUiTest {
+        fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"README.md\"]"
+
+        setCompactWidth()
+        setContent { WorkspaceScreen(viewModel = viewModel) }
+
+        advanceUntilIdle()
+        composeRule.onNodeWithTag("workspace_create_file_button").performClick()
+        advanceUntilIdle()
+
+        composeRule.onNodeWithTag("workspace_create_filename_field").assertIsDisplayed()
+        composeRule.onNodeWithTag("workspace_create_confirm_button").assertIsDisplayed()
+    }
+
+    @Config(qualifiers = "w800dp-h1280dp")
+    @Test
+    fun workspaceScreenExpanded_deleteButtonVisibleOnFileItems() = runUiTest {
+        fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"app/src/Temp.kt\"]"
+
+        setExpandedWidth()
+        setContent { WorkspaceScreen(viewModel = viewModel) }
+
+        advanceUntilIdle()
+        composeRule.onNodeWithTag("workspace_delete_file_app/src/Temp.kt").assertIsDisplayed()
+    }
 }

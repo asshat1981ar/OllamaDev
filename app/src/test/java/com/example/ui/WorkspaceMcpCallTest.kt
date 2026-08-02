@@ -51,6 +51,36 @@ class WorkspaceMcpCallTest : UiTestBase() {
     }
 
     @Test
+    fun createWorkspaceFile_createsAndSelectsNewFile() = runUiTest {
+        fakeMcpClient.scriptedToolResults["write_workspace_file"] = "OK"
+        fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"app/src/New.kt\"]"
+        fakeMcpClient.scriptedToolResults["read_workspace_file"] = "package com.example"
+
+        viewModel.createWorkspaceFile(serverId = 7, path = "app/src/New.kt")
+        advanceUntilIdle()
+
+        assertEquals("Created app/src/New.kt", viewModel.voiceFeedback.value)
+        assertEquals("app/src/New.kt", viewModel.selectedWorkspaceFile.value)
+        assertEquals("package com.example", viewModel.workspaceFileContent.value)
+    }
+
+    @Test
+    fun deleteWorkspaceFile_removesFileAndReloadsList() = runUiTest {
+        fakeMcpClient.scriptedToolResults["delete_workspace_file"] = "Deleted"
+        fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"README.md\"]"
+
+        viewModel.readWorkspaceFile(serverId = 7, path = "app/src/Old.kt")
+        advanceUntilIdle()
+        assertEquals("app/src/Old.kt", viewModel.selectedWorkspaceFile.value)
+
+        viewModel.deleteWorkspaceFile(serverId = 7, path = "app/src/Old.kt")
+        advanceUntilIdle()
+
+        assertEquals("Deleted app/src/Old.kt", viewModel.voiceFeedback.value)
+        assertEquals(null, viewModel.selectedWorkspaceFile.value)
+    }
+
+    @Test
     fun loadWorkspaceFiles_skipsWhenServerNotConnected() = runUiTest {
         // Update server status to Disconnected
         viewModel.updateMcpServer(

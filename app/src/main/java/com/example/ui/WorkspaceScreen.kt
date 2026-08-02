@@ -60,6 +60,8 @@ fun WorkspaceScreen(
     var searchQuery by remember { mutableStateOf("") }
     var editorText by remember(selectedFile) { mutableStateOf(fileContent) }
     var isReadOnly by remember { mutableStateOf(false) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var createFileName by remember { mutableStateOf("") }
 
     LaunchedEffect(fileContent) {
         editorText = fileContent
@@ -144,6 +146,14 @@ fun WorkspaceScreen(
                         Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", modifier = Modifier.size(20.dp))
                     }
                 }
+
+                IconButton(
+                    onClick = { showCreateDialog = true },
+                    enabled = activeServer?.status == "Connected" && !isLoading,
+                    modifier = Modifier.size(44.dp).testTag("workspace_create_file_button")
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = "New file", modifier = Modifier.size(20.dp))
+                }
             }
         }
 
@@ -164,6 +174,50 @@ fun WorkspaceScreen(
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        if (showCreateDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showCreateDialog = false
+                    createFileName = ""
+                },
+                title = { Text("Create new file") },
+                text = {
+                    OutlinedTextField(
+                        value = createFileName,
+                        onValueChange = { createFileName = it },
+                        placeholder = { Text("path/to/file.kt") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("workspace_create_filename_field")
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            activeServer?.let { server ->
+                                val name = createFileName.trim()
+                                if (name.isNotBlank()) {
+                                    viewModel.createWorkspaceFile(server.id, name)
+                                }
+                            }
+                            showCreateDialog = false
+                            createFileName = ""
+                        },
+                        enabled = createFileName.trim().isNotBlank(),
+                        modifier = Modifier.testTag("workspace_create_confirm_button")
+                    ) { Text("Create") }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showCreateDialog = false
+                            createFileName = ""
+                        },
+                        modifier = Modifier.testTag("workspace_create_cancel_button")
+                    ) { Text("Cancel") }
+                }
+            )
         }
 
         if (filesystemServers.isEmpty()) {
@@ -196,6 +250,9 @@ fun WorkspaceScreen(
                     onSelect = { path ->
                         activeServer?.let { viewModel.readWorkspaceFile(it.id, path) }
                     },
+                    onDelete = { path ->
+                        activeServer?.let { viewModel.deleteWorkspaceFile(it.id, path) }
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 EditorPanel(
@@ -226,6 +283,9 @@ fun WorkspaceScreen(
                                 viewModel.readWorkspaceFile(it.id, path)
                                 showEditor = true
                             }
+                        },
+                        onDelete = { path ->
+                            activeServer?.let { viewModel.deleteWorkspaceFile(it.id, path) }
                         },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -309,6 +369,7 @@ private fun FileListPanel(
     files: List<String>,
     selectedFile: String?,
     onSelect: (String) -> Unit,
+    onDelete: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
@@ -371,6 +432,20 @@ private fun FileListPanel(
                             fontFamily = FontFamily.Monospace,
                             modifier = Modifier.weight(1f)
                         )
+
+                        if (onDelete != null) {
+                            IconButton(
+                                onClick = { onDelete(path) },
+                                modifier = Modifier.size(24.dp).testTag("workspace_delete_file_$path")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete,
+                                    contentDescription = "Delete",
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

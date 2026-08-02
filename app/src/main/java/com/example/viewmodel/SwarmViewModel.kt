@@ -1253,6 +1253,79 @@ class SwarmViewModel(
         }
     }
 
+    /** Creates a new empty file at [path] through the connected filesystem MCP server. */
+    fun createWorkspaceFile(serverId: Int, path: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(
+                        server.sourceUrl,
+                        session,
+                        authToken,
+                        "write_workspace_file",
+                        mapOf("path" to path, "content" to "", "create_dirs" to true)
+                    )
+                }
+                result.fold(
+                    onSuccess = {
+                        _voiceFeedback.value = "Created $path"
+                        loadWorkspaceFiles(serverId)
+                        readWorkspaceFile(serverId, path)
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to create file"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
+    /** Deletes [path] through the connected filesystem MCP server. */
+    fun deleteWorkspaceFile(serverId: Int, path: String) {
+        viewModelScope.launch {
+            _isWorkspaceLoading.value = true
+            _workspaceError.value = null
+            try {
+                val server = db.mcpServerDao().getServerById(serverId) ?: return@launch
+                val authToken = securePrefs.getMcpToken(serverId)
+                val initResult = withContext(dispatcher) { mcpClient.initialize(server.sourceUrl, authToken) }
+                val session = initResult.getOrNull() ?: run {
+                    _workspaceError.value = initResult.exceptionOrNull()?.message ?: "Failed to connect"
+                    return@launch
+                }
+                val result = withContext(dispatcher) {
+                    mcpClient.callTool(server.sourceUrl, session, authToken, "delete_workspace_file", mapOf("path" to path))
+                }
+                result.fold(
+                    onSuccess = {
+                        _voiceFeedback.value = "Deleted $path"
+                        if (_selectedWorkspaceFile.value == path) {
+                            _selectedWorkspaceFile.value = null
+                            _workspaceFileContent.value = ""
+                        }
+                        loadWorkspaceFiles(serverId)
+                    },
+                    onFailure = { error ->
+                        _workspaceError.value = error.localizedMessage ?: "Failed to delete file"
+                    }
+                )
+            } finally {
+                _isWorkspaceLoading.value = false
+            }
+        }
+    }
+
     private val _isImportingFolder = MutableStateFlow(false)
     val isImportingFolder: StateFlow<Boolean> = _isImportingFolder.asStateFlow()
 

@@ -4,6 +4,7 @@ This script exercises the same MCP tools that the WorkspaceScreen UI uses:
 - list_workspace_files
 - read_workspace_file
 - write_workspace_file
+- delete_workspace_file
 
 Run with the companion server already running:
     cd /home/userland/ollamadev-mcp-server
@@ -62,18 +63,21 @@ def extract_text(result: dict) -> str:
     )
 
 
+def list_files(root: str) -> list[str]:
+    result = make_request(
+        "tools/call",
+        {"name": "list_workspace_files", "arguments": {"root": root}},
+        tool_name="list_workspace_files",
+    )
+    return [line for line in extract_text(result).splitlines() if line.strip()]
+
+
 def main() -> int:
     print(f"Verifying Workspace Browser MCP integration at {SERVER_URL}")
 
     # 1. List workspace files (matching WorkspaceScreen loadWorkspaceFiles)
     print("\n1. tools/call list_workspace_files")
-    list_result = make_request(
-        "tools/call",
-        {"name": "list_workspace_files", "arguments": {"root": "app/src/main/java/com/example"}},
-        tool_name="list_workspace_files",
-    )
-    files_text = extract_text(list_result)
-    files = [line for line in files_text.splitlines() if line.strip()]
+    files = list_files("app/src/main/java/com/example")
     print(f"   files in app/src/main/java/com/example: {len(files)}")
     if not files:
         print("ERROR: no files returned")
@@ -127,6 +131,54 @@ def main() -> int:
     if "mcp workspace verify ok" not in verify_content:
         print("ERROR: written file did not round-trip correctly")
         return 1
+
+    # 5. Create a file (matching WorkspaceScreen createWorkspaceFile)
+    print("\n5. tools/call write_workspace_file (create)")
+    create_path = "app/src/debug/.mcp_create_verify.kt"
+    create_result = make_request(
+        "tools/call",
+        {
+            "name": "write_workspace_file",
+            "arguments": {"path": create_path, "content": "package com.example", "create_dirs": True},
+        },
+        tool_name="write_workspace_file",
+    )
+    create_text = extract_text(create_result)
+    print(f"   create result: {create_text[:120]}")
+    if "written" not in create_text.lower() and "ok" not in create_text.lower():
+        print("ERROR: create did not report success")
+        return 1
+    if not any(create_path in f for f in list_files("app/src/debug")):
+        print("ERROR: created file not present in listing")
+        return 1
+
+    # 6. Delete the created file (matching WorkspaceScreen deleteWorkspaceFile)
+    print("\n6. tools/call delete_workspace_file")
+    delete_result = make_request(
+        "tools/call",
+        {"name": "delete_workspace_file", "arguments": {"path": create_path}},
+        tool_name="delete_workspace_file",
+    )
+    delete_text = extract_text(delete_result)
+    print(f"   delete result: {delete_text[:120]}")
+    if "deleted" not in delete_text.lower() and "ok" not in delete_text.lower():
+        print("ERROR: delete did not report success")
+        return 1
+    if any(create_path in f for f in list_files("app/src/debug")):
+        print("ERROR: deleted file still present in listing")
+        return 1
+
+    # Clean up verification artifacts so the workspace stays clean.
+    print("\n7. cleanup verification artifacts")
+    for artifact in [test_path, create_path]:
+        try:
+            make_request(
+                "tools/call",
+                {"name": "delete_workspace_file", "arguments": {"path": artifact}},
+                tool_name="delete_workspace_file",
+            )
+        except Exception as exc:
+            print(f"   warning: could not delete {artifact}: {exc}")
 
     print("\nAll Workspace Browser MCP integration checks passed.")
     return 0
