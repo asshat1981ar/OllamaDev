@@ -1,0 +1,15 @@
+name: Dependency updates
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 0' # weekly on Sundays at 03:00 UTC
+
+jobs:
+  dependency-updates:
+    uses: ./.github/workflows/gradle-task.yml
+    with:
+      task: "-Dorg.gradle.configuration-cache=false dependencyUpdates"
+      artifact_name: "dependency-updates-report"
+      cache_read_only: true
+      timeout_minutes: 30
