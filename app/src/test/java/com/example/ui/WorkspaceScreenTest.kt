@@ -78,4 +78,24 @@ class WorkspaceScreenTest : UiTestBase() {
         advanceUntilIdle()
         composeRule.onNodeWithTag("workspace_delete_file_app/src/Temp.kt").assertIsDisplayed()
     }
+
+    @Config(qualifiers = "w360dp-h6000dp")
+    @Test
+    fun workspaceScreen_outlineSwitchShowsOutlinePanel() = runUiTest {
+        fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"app/src/Main.kt\"]"
+        fakeMcpClient.scriptedToolResults["read_workspace_file"] = "package com.example"
+        fakeMcpClient.scriptedToolResults["get_file_outline"] = "Outline of MainActivity.kt (1 signatures)\n1: package com.example"
+
+        setCompactWidth()
+        setContent { WorkspaceScreen(viewModel = viewModel) }
+
+        advanceUntilIdle()
+        composeRule.onNodeWithTag("workspace_file_item_app/src/Main.kt").performClick()
+        advanceUntilIdle()
+
+        composeRule.onNodeWithTag("workspace_outline_switch").performClick()
+        advanceUntilIdle()
+
+        composeRule.onNodeWithTag("workspace_outline_text").assertIsDisplayed()
+    }
 }

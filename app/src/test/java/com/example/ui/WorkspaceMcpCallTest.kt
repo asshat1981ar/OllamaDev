@@ -81,6 +81,16 @@ class WorkspaceMcpCallTest : UiTestBase() {
     }
 
     @Test
+    fun loadFileOutline_loadsOutlineIntoState() = runUiTest {
+        fakeMcpClient.scriptedToolResults["get_file_outline"] = "Outline of MainActivity.kt (3 signatures)\n1: package com.example"
+
+        viewModel.loadFileOutline(serverId = 7, path = "app/src/main/java/com/example/MainActivity.kt")
+        advanceUntilIdle()
+
+        assertEquals("Outline of MainActivity.kt (3 signatures)\n1: package com.example", viewModel.workspaceFileOutline.value)
+    }
+
+    @Test
     fun loadWorkspaceFiles_skipsWhenServerNotConnected() = runUiTest {
         // Update server status to Disconnected
         viewModel.updateMcpServer(

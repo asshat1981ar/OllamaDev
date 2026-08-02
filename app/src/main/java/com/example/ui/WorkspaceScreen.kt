@@ -49,6 +49,7 @@ fun WorkspaceScreen(
     val selectedServerId by viewModel.selectedWorkspaceServerId.collectAsState()
     val isLoading by viewModel.isWorkspaceLoading.collectAsState()
     val error by viewModel.workspaceError.collectAsState()
+    val fileOutline by viewModel.workspaceFileOutline.collectAsState()
 
     val filesystemServers = servers.filter { it.type == "Filesystem" }
     val activeServer = filesystemServers.firstOrNull { it.id == selectedServerId }
@@ -62,6 +63,7 @@ fun WorkspaceScreen(
     var isReadOnly by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var createFileName by remember { mutableStateOf("") }
+    var showOutline by remember { mutableStateOf(false) }
 
     LaunchedEffect(fileContent) {
         editorText = fileContent
@@ -74,6 +76,12 @@ fun WorkspaceScreen(
     LaunchedEffect(activeServer, searchQuery) {
         activeServer?.takeIf { it.status == "Connected" }?.let {
             viewModel.loadWorkspaceFiles(it.id, searchQuery)
+        }
+    }
+
+    LaunchedEffect(selectedFile, showOutline, activeServer) {
+        activeServer?.takeIf { it.status == "Connected" && showOutline && selectedFile != null }?.let {
+            viewModel.loadFileOutline(it.id, selectedFile!!)
         }
     }
 
@@ -268,6 +276,9 @@ fun WorkspaceScreen(
                             }
                         }
                     },
+                    outline = fileOutline,
+                    showOutline = showOutline,
+                    onShowOutlineChange = { showOutline = it },
                     modifier = Modifier.weight(2f)
                 )
             }
@@ -304,6 +315,9 @@ fun WorkspaceScreen(
                                 }
                             }
                         },
+                        outline = fileOutline,
+                        showOutline = showOutline,
+                        onShowOutlineChange = { showOutline = it },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -462,6 +476,9 @@ private fun EditorPanel(
     onTextChange: (String) -> Unit,
     onSave: () -> Unit,
     onBack: (() -> Unit)? = null,
+    outline: String = "",
+    showOutline: Boolean = false,
+    onShowOutlineChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
@@ -496,6 +513,15 @@ private fun EditorPanel(
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Outline", fontSize = 11.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Switch(
+                        checked = showOutline,
+                        onCheckedChange = onShowOutlineChange,
+                        modifier = Modifier.testTag("workspace_outline_switch")
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Read-only", fontSize = 11.sp, color = Color.Gray)
                     Spacer(modifier = Modifier.width(4.dp))
                     Switch(
@@ -528,28 +554,56 @@ private fun EditorPanel(
                 )
             }
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF0F0E12), RoundedCornerShape(8.dp))
-                    .border(BorderStroke(1.dp, Color(0xFF231E29)), RoundedCornerShape(8.dp))
-                    .padding(8.dp)
-            ) {
-                BasicTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    readOnly = isReadOnly,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFECEFF1),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    ),
+            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .testTag("workspace_editor_textarea")
-                )
+                        .weight(if (showOutline) 2f else 1f)
+                        .fillMaxWidth()
+                        .background(Color(0xFF0F0E12), RoundedCornerShape(8.dp))
+                        .border(BorderStroke(1.dp, Color(0xFF231E29)), RoundedCornerShape(8.dp))
+                        .padding(8.dp)
+                ) {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = onTextChange,
+                        readOnly = isReadOnly,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFECEFF1),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        ),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .testTag("workspace_editor_textarea")
+                    )
+                }
+
+                if (showOutline) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .background(Color(0xFF0F0E12), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, Color(0xFF231E29)), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = outline.ifBlank { "Loading outline..." },
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFB0B0B0),
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp
+                            ),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .testTag("workspace_outline_text")
+                        )
+                    }
+                }
             }
         }
     }
