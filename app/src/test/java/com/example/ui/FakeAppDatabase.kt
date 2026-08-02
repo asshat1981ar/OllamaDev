@@ -137,7 +137,10 @@ private class FakeWorkspaceFileDao(seed: List<WorkspaceFile>) : WorkspaceFileDao
     override fun getAllFiles(): Flow<List<WorkspaceFile>> = store.flow()
     override suspend fun getFileById(id: Int): WorkspaceFile? = store.snapshot().find { it.id == id }
     override suspend fun getFileByPath(filePath: String): WorkspaceFile? =
-        store.snapshot().find { it.filePath == filePath }
+        // Return the most recently-inserted row for a path (insertion order = most recent last),
+        // so a re-queued sprint phase that rewrites its artifact path sees the fresh content,
+        // not a stale duplicate from the earlier run.
+        store.snapshot().lastOrNull { it.filePath == filePath }
     override suspend fun insertFile(file: WorkspaceFile): Long = store.insertOrReplace(file)
     override suspend fun insertFilesBatch(files: List<WorkspaceFile>) = store.insertOrReplaceAll(files)
     override suspend fun updateFile(file: WorkspaceFile) = store.updateIfExists(file)

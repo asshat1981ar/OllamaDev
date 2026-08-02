@@ -5,9 +5,13 @@ import androidx.compose.ui.test.onNodeWithText
 import com.example.data.AgentStateStore
 import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Test
+import org.robolectric.annotation.Config
 
 class AgentScreenAwaitingApprovalTest : UiTestBase() {
 
+    // Tall viewport so the agent cards (rendered below the header + metrics console in the
+    // LazyColumn) are actually on-screen; otherwise assertIsDisplayed fails with "not displayed".
+    @Config(qualifiers = "w360dp-h6000dp")
     @Test
     fun agentWithAwaitingApprovalStatus_rendersOrangeBadge() = runUiTest {
         // Render the screen first so Compose subscribes to viewModel.allAgents,
