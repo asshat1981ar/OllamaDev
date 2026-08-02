@@ -1,9 +1,11 @@
 package com.example.ui
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import com.example.viewmodel.SwarmViewModel
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -58,7 +60,12 @@ class WorkspaceScreenTest : UiTestBase() {
         composeRule.onNodeWithTag("workspace_editor_textarea").assertIsDisplayed()
     }
 
-    @Config(qualifiers = "w360dp-h6000dp")
+    // The create button sits in a header Row that overflows the narrow default Robolectric
+    // viewport (320dp), clipping its layout bounds to zero width -- so performClick()'s injected
+    // touch silently misses it and the dialog never opens. Invoke OnClick as a semantics action
+    // instead, which works regardless of on-screen geometry. No size qualifier is set: a Dialog
+    // containing a TextField misbehaves under size qualifiers (robolectric#8460), and
+    // McpServerAndRegistryTest/GitIntegrationTest are the known-good in-repo dialog patterns.
     @Test
     fun workspaceScreen_createFileButtonOpensDialog() = runUiTest {
         fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"README.md\"]"
@@ -66,16 +73,14 @@ class WorkspaceScreenTest : UiTestBase() {
         fakeMcpClient.scriptedToolResults["read_workspace_file"] = ""
         fakeMcpClient.scriptedToolResults["create_workspace_file"] = "OK"
 
-        setCompactWidth()
         setContent { WorkspaceScreen(viewModel = viewModel) }
 
         advanceUntilIdle()
-        composeRule.onNodeWithTag("workspace_create_file_button").performClick()
-        advanceUntilIdle()
+        composeRule.onNodeWithTag("workspace_create_file_button")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.waitForIdle()
 
-        // Robolectric dialog windows can compose content that reports "not displayed"
-        // (known Robolectric dialog+TextField quirk, cf. McpServerAndRegistryTest), so assert
-        // existence of the in-dialog fields rather than display, then exercise the create flow.
+        // Assert existence (not display) of the in-dialog fields, then exercise the create flow.
         composeRule.onNodeWithTag("workspace_create_filename_field").assertExists()
         composeRule.onNodeWithTag("workspace_create_confirm_button").assertExists()
 
