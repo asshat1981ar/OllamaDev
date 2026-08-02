@@ -47,6 +47,16 @@ extension and copies only the **arch-independent** parts into `~/.gradle`:
 `caches/modules-2`, `caches/modules-2-files`, `wrapper/dists`. Compiled/transform caches are
 intentionally skipped (x86_64-specific; unusable and harmful on aarch64).
 
+## Cache discovery: gradle/actions/setup-gradle@v3 restore 400
+
+While validating, the repo had **zero** Actions caches even though every run configured
+`gradle/actions/setup-gradle@v3` — the setup step logged `Failed to restore
+gradle-home-v1|Linux|test[<hash>]-<sha>: Error: Cache service responded with 400`, so
+every job cold-started (re-downloaded the Gradle distribution + dependencies). The reusable
+runner now pins `gradle/actions/setup-gradle@v4` (uses actions/cache v4), which fixes the
+cache-service interaction. `gh api repos/{owner}/{repo}/actions/caches` should show entries
+after a v4 run, and `scripts/pull-gradle-cache.sh --list` can then verify/download them.
+
 ## Constraints & tradeoffs
 
 - **`task` / `shell` inputs are verbatim-expanded.** Acceptable: reusable workflows are only
