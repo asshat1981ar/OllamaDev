@@ -1169,12 +1169,17 @@ class SwarmViewModel(
                 }
                 result.fold(
                     onSuccess = { json ->
-                        val files = listAdapter.fromJson(json)
-                            ?.filter { query.isBlank() || it.contains(query, ignoreCase = true) }
-                            ?: emptyList()
-                        _workspaceBrowserFiles.value = files
-                        if (_selectedWorkspaceFile.value !in files) {
-                            _selectedWorkspaceFile.value = null
+                        try {
+                            val files = listAdapter.fromJson(json)
+                                ?.filter { query.isBlank() || it.contains(query, ignoreCase = true) }
+                                ?: emptyList()
+                            _workspaceBrowserFiles.value = files
+                            if (_selectedWorkspaceFile.value !in files) {
+                                _selectedWorkspaceFile.value = null
+                            }
+                        } catch (e: Exception) {
+                            // Defensive: a server returning malformed JSON shouldn't crash the coroutine.
+                            _workspaceError.value = e.localizedMessage ?: "Failed to parse file list"
                         }
                     },
                     onFailure = { error ->

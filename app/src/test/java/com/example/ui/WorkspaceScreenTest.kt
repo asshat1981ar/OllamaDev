@@ -1,11 +1,14 @@
 package com.example.ui
 
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import com.example.viewmodel.SwarmViewModel
 import kotlinx.coroutines.test.advanceUntilIdle
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.robolectric.annotation.Config
 
@@ -42,12 +45,17 @@ class WorkspaceScreenTest : UiTestBase() {
     @Test
     fun workspaceScreenExpanded_showsFileListAndEditorSideBySide() = runUiTest {
         fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"app/src/main/java/com/example/MainActivity.kt\"]"
+        fakeMcpClient.scriptedToolResults["read_workspace_file"] = "package com.example"
 
         setExpandedWidth()
         setContent { WorkspaceScreen(viewModel = viewModel) }
 
         advanceUntilIdle()
         composeRule.onNodeWithTag("workspace_file_item_app/src/main/java/com/example/MainActivity.kt").assertIsDisplayed()
+        // The editor only shows the textarea once a file is selected (otherwise it renders a
+        // "Select a file from the list to edit." placeholder).
+        composeRule.onNodeWithTag("workspace_file_item_app/src/main/java/com/example/MainActivity.kt").performClick()
+        advanceUntilIdle()
         composeRule.onNodeWithTag("workspace_editor_textarea").assertIsDisplayed()
     }
 
@@ -55,6 +63,9 @@ class WorkspaceScreenTest : UiTestBase() {
     @Test
     fun workspaceScreen_createFileButtonOpensDialog() = runUiTest {
         fakeMcpClient.scriptedToolResults["list_workspace_files"] = "[\"README.md\"]"
+        fakeMcpClient.scriptedToolResults["write_workspace_file"] = "OK"
+        fakeMcpClient.scriptedToolResults["read_workspace_file"] = ""
+        fakeMcpClient.scriptedToolResults["create_workspace_file"] = "OK"
 
         setCompactWidth()
         setContent { WorkspaceScreen(viewModel = viewModel) }
@@ -63,8 +74,18 @@ class WorkspaceScreenTest : UiTestBase() {
         composeRule.onNodeWithTag("workspace_create_file_button").performClick()
         advanceUntilIdle()
 
-        composeRule.onNodeWithTag("workspace_create_filename_field").assertIsDisplayed()
-        composeRule.onNodeWithTag("workspace_create_confirm_button").assertIsDisplayed()
+        // Robolectric dialog windows can compose content that reports "not displayed"
+        // (known Robolectric dialog+TextField quirk, cf. McpServerAndRegistryTest), so assert
+        // existence of the in-dialog fields rather than display, then exercise the create flow.
+        composeRule.onNodeWithTag("workspace_create_filename_field").assertExists()
+        composeRule.onNodeWithTag("workspace_create_confirm_button").assertExists()
+
+        composeRule.onNodeWithTag("workspace_create_filename_field").performTextInput("notes/idea.md")
+        composeRule.onNodeWithTag("workspace_create_confirm_button").performClick()
+        advanceUntilIdle()
+
+        assertEquals("Created notes/idea.md", viewModel.voiceFeedback.value)
+        assertEquals("notes/idea.md", viewModel.selectedWorkspaceFile.value)
     }
 
     @Config(qualifiers = "w800dp-h1280dp")

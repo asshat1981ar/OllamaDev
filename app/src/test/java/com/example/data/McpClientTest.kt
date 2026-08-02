@@ -29,23 +29,23 @@ class McpClientTest {
 
     @Test
     fun initialize_parsesSessionIdFromJsonResponse() = runBlocking {
+        // The dual-protocol client probes the modern (2026-07-28) transport first; the
+        // Mcp-Session-Id header on that response is what becomes the session id.
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "application/json")
                 .setHeader("Mcp-Session-Id", "session-123")
                 .setBody("""{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}""")
         )
-        server.enqueue(MockResponse().setResponseCode(202)) // notifications/initialized
 
         val result = client.initialize(server.url("/mcp").toString(), authToken = null)
 
         assertTrue(result.isSuccess)
         assertEquals("session-123", result.getOrNull()?.sessionId)
 
-        val initRequest = server.takeRequest()
-        assertTrue(initRequest.body.readUtf8().contains("\"method\":\"initialize\""))
-        val notifyRequest = server.takeRequest()
-        assertTrue(notifyRequest.body.readUtf8().contains("notifications/initialized"))
+        val probeRequest = server.takeRequest()
+        assertTrue(probeRequest.body.readUtf8().contains("\"method\":\"tools/list\""))
+        assertEquals("2026-07-28", probeRequest.getHeader("MCP-Protocol-Version"))
     }
 
     @Test
