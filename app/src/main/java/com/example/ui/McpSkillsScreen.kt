@@ -86,6 +86,15 @@ fun McpSkillsScreen(
                     Text("Registry", fontSize = 12.sp)
                 }
 
+                OutlinedButton(
+                    onClick = { viewModel.addOllamaDevCompanionServer() },
+                    modifier = Modifier.testTag("add_companion_server_button")
+                ) {
+                    Icon(Icons.Rounded.Hub, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("OllamaDev Tools", fontSize = 12.sp)
+                }
+
                 Button(
                     onClick = { showAddServerDialog = true },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),

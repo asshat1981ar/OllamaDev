@@ -354,6 +354,10 @@ class SwarmViewModel(
                     availableModels = models
                 )
             )
+            AnalyticsTracker.track(
+                "node_connection_tested",
+                mapOf("success" to isOnline, "latency_ms" to latency)
+            )
         }
     }
 
@@ -484,6 +488,19 @@ class SwarmViewModel(
             }
             connectMcpServer(id, sourceUrl, type, authToken.ifBlank { null })
         }
+    }
+
+    /**
+     * Add the local OllamaDev companion MCP server. The companion server uses the modern
+     * streamable HTTP transport and exposes filesystem/code/build tools for the workspace.
+     */
+    fun addOllamaDevCompanionServer() {
+        addMcpServer(
+            name = "OllamaDev Tools",
+            type = "Filesystem",
+            sourceUrl = "http://10.0.2.2:5000/mcp",
+            configuredParams = "{\"workspace\":\"/home/userland/OllamaDev\"}"
+        )
     }
 
     fun updateMcpServer(server: McpServer) {
@@ -674,6 +691,10 @@ class SwarmViewModel(
     fun runSwarm(config: SwarmConfig, prompt: String) {
         viewModelScope.launch {
             _isExecutingTask.value = true
+            AnalyticsTracker.track(
+                "prompt_sent",
+                mapOf("source" to "manual", "prompt_length" to prompt.length)
+            )
             swarmEngine.executeTask(config, prompt, onTaskCreated = { id -> _selectedTaskId.value = id })
             _isExecutingTask.value = false
         }
@@ -716,6 +737,10 @@ class SwarmViewModel(
         val config = _selectedSessionSwarmConfig.value ?: allSwarmConfigs.value.firstOrNull() ?: return
         viewModelScope.launch {
             _isExecutingTask.value = true
+            AnalyticsTracker.track(
+                "prompt_sent",
+                mapOf("source" to "session", "prompt_length" to prompt.length)
+            )
             _sessionInputHistory.value = (_sessionInputHistory.value + prompt).takeLast(50)
 
             val recentMessages = db.chatMessageDao().getRecentMessagesSync(20).sortedBy { it.timestamp }
@@ -755,6 +780,10 @@ class SwarmViewModel(
                 return@launch
             }
             _isExecutingTask.value = true
+            AnalyticsTracker.track(
+                "prompt_sent",
+                mapOf("source" to "background", "prompt_length" to prompt.length)
+            )
             com.example.service.AgenticLoopService.startAgenticLoop(getApplication(), config, prompt)
             _isExecutingTask.value = false
         }
