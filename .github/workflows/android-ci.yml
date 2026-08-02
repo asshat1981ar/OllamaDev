@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Allow on-demand re-runs of the standard merge gate (test + build) on any branch,
+  # e.g. `scripts/delegate-build.sh` or `gh workflow run "Android CI" --ref <branch>`.
+  workflow_dispatch:
 
 # Cancel in-flight runs for the same branch when a new commit lands. Saves runner minutes
 # when an author pushes followup commits to a PR before the previous run finishes.

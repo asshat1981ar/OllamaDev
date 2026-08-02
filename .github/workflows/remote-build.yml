@@ -1,0 +1,74 @@
+# Remote Build Delegation — run an arbitrary gradlew task (and pull back its artifacts)
+# on a real x86_64 Ubuntu runner, on demand, via workflow_dispatch.
+#
+# Why: the local dev container is an aarch64 Android userland that (a) cannot run the
+# x86_64 Android build-tools natively (needs a QEMU/aapt2 workaround) and (b) cannot render
+# real Roborazzi/Robolectric pixels. Delegating build/test/screenshot recording to a GitHub
+# runner produces genuine artifacts — real APKs and real anti-aliased screenshots — with no
+# emulation. The local driver `scripts/delegate-build.sh` wraps this workflow.
+#
+# NOTE: dispatch runs against a *pushed* ref (branch/tag/SHA). Uncommitted local working-tree
+# changes are not visible to GitHub; commit+push them first (delegate-build.sh --commit does
+# this for you).
+name: Remote Build Delegation
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Gradle task(s) to run, e.g. ":app:assembleDebug" or ":app:testDebugUnitTest --tests com.example.ui.WorkspaceScreenTest"'
+        required: false
+        default: ':app:testDebugUnitTest'
+      ref:
+        description: 'Optional branch/tag/SHA to check out (default: the branch/ref the dispatch was triggered against)'
+        required: false
+        default: ''
+
+jobs:
+  delegate:
+    name: Run delegated gradle task
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # inputs.ref is optional; when blank GitHub already checked out the triggering ref,
+          # so leave it to resolve to that. When an explicit ref is given, check it out.
+          ref: ${{ inputs.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Reuse Gradle dependency/distribution caches. cache-read-only avoids evicting the
+      # shared main-branch cache from PR/feature-branch runs, exactly like the main CI.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: true
+
+      # The task string is expanded verbatim so the caller controls exactly what runs.
+      # Flexible by design; this workflow is only dispatch-triggered by users with write
+      # access to this repo, so the injection surface is acceptable.
+      - name: Run delegated gradle task
+        id: gradle
+        run: ./gradlew ${{ inputs.task }}
+
+      # Package whatever the task produced so the caller can download it back.
+      # Covers the debug APK, JUnit HTML/XML reports, and real Roborazzi screenshots
+      # (app/build/outputs/roborazzi-screens/*.png). Always upload (even on failure) so a
+      # red run still returns its reports to diagnose.
+      - name: Upload build outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-build-outputs
+          path: |
+            app/build/outputs/**
+            app/build/reports/**
+          if-no-files-found: warn
+          retention-days: 14

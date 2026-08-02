@@ -193,7 +193,30 @@ downward — 4a must ship before 4b; 4b before 4c/4d; 4c/4d are independent.
 
 ---
 
-## Deferred, not re-litigated here
+## Tier 6 — Remote build delegation to GitHub (new, spec 10)
+
+These items offload `gradlew`/build/screenshot work from the slow aarch64 QEMU-shimmed
+local container to real x86_64 GitHub Actions runners, and pull the artifacts back.
+Designed in `agent-os/product/specs/10-remote-build-delegation.md`.
+
+- [x] **6a. `remote-build.yml` generic on-demand runner.** Added
+      `.github/workflows/remote-build.yml`: `workflow_dispatch` with `task` + optional `ref`
+      inputs; single `ubuntu-latest` job runs `./gradlew ${{ inputs.task }}` and uploads
+      `app/build/outputs/**` + `app/build/reports/**` as a `remote-build-outputs` artifact
+      (`if: always()`). Covers APK, JUnit reports, and real Roborazzi screenshots.
+- [x] **6b. `scripts/delegate-build.sh` local driver.** One-command wrapper: optional
+      commit+push (`--commit`, PAT-over-HTTPS via `gh auth setup-git`), trigger dispatch,
+      `gh run watch --exit-status`, `gh run download` into `ci-artifacts/`, non-zero exit on
+      failure. Runnable as `scripts/delegate-build.sh '<gradle task>'`.
+- [x] **6c. On-demand merge gate.** Added `workflow_dispatch:` to `android-ci.yml` so the
+      standard `test` + `build` jobs can be re-run on any branch without a PR.
+- [x] **6d. Spec + docs.** `agent-os/product/specs/10-remote-build-delegation.md` documents
+      the mechanism, constraints (pushed-ref-only, actions minutes, injection surface), and
+      verification commands.
+
+---
+
+
 
 These were flagged as explicit open decisions in the original plan and are
 intentionally *not* on this backlog — revisit only if they start causing
