@@ -79,7 +79,29 @@ fi
 # --- 2. Trigger the dispatch workflow --------------------------------------
 echo "Delegating to GitHub: repo=$REPO workflow=$WORKFLOW branch=$BRANCH"
 echo "  gradle task: $TASK"
-gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$BRANCH" -f task="$TASK"
+if gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$BRANCH" -f task="$TASK"; then
+    : # dispatched normally
+else
+    # GitHub only lets workflow_dispatch target workflows that exist on the default
+    # branch (the actions API resolves workflows against main). A brand-new workflow
+    # file is therefore NOT dispatchable until it lands on main. For the default task
+    # fall back to the standard "Android CI" gate (fixed :app:testDebugUnitTest +
+    # :app:assembleDebug); for custom tasks, fail with actionable guidance.
+    if [[ "$TASK" == ":app:testDebugUnitTest" ]]; then
+        echo "warning: '$WORKFLOW' is not dispatchable yet (workflows are only visible from the default branch)."
+        echo "warning: falling back to the standard 'Android CI' gate; the task input is fixed."
+        WORKFLOW="Android CI"
+        gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$BRANCH" || {
+            echo "error: fallback dispatch to '$WORKFLOW' failed (is workflow_dispatch present on branch '$BRANCH'?)" >&2
+            exit 1
+        }
+    else
+        echo "error: '$WORKFLOW' not found; workflows can only be dispatched once they exist on the default branch." >&2
+        echo "error: cannot run custom task '$TASK' until '$WORKFLOW' is merged to main." >&2
+        echo "error: for the standard gate now, run: gh workflow run \"Android CI\" --repo \"$REPO\" --ref \"$BRANCH\"" >&2
+        exit 1
+    fi
+fi
 
 # Poll for the newest run of this workflow/branch (the one we just created).
 for _ in $(seq 1 30); do

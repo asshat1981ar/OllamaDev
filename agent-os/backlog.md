@@ -207,7 +207,10 @@ Designed in `agent-os/product/specs/10-remote-build-delegation.md`.
 - [x] **6b. `scripts/delegate-build.sh` local driver.** One-command wrapper: optional
       commit+push (`--commit`, PAT-over-HTTPS via `gh auth setup-git`), trigger dispatch,
       `gh run watch --exit-status`, `gh run download` into `ci-artifacts/`, non-zero exit on
-      failure. Runnable as `scripts/delegate-build.sh '<gradle task>'`.
+      failure. Runnable as `scripts/delegate-build.sh '<gradle task>'`. Handles the
+      default-branch visibility constraint (new workflows can't be dispatched until they
+      land on `main`): falls back to the standard `Android CI` gate for the default task,
+      with guidance otherwise.
 - [x] **6c. On-demand merge gate.** Added `workflow_dispatch:` to `android-ci.yml` so the
       standard `test` + `build` jobs can be re-run on any branch without a PR.
 - [x] **6d. Spec + docs.** `agent-os/product/specs/10-remote-build-delegation.md` documents

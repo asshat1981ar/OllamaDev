@@ -71,6 +71,12 @@ be re-run on demand on any branch (not just via PR), e.g. before opening a PR.
 
 - **Runs against a pushed ref only.** `workflow_dispatch` cannot see uncommitted local
   changes; the driver's `--commit` handles committing + pushing first.
+- **Workflows are only dispatchable once they exist on the default branch.** The actions
+  API resolves workflow names/files against `main`, so a brand-new `remote-build.yml` is
+  invisible to `gh workflow run` until it lands on `main`. `delegate-build.sh` handles this:
+  for the default task (`:app:testDebugUnitTest`) it falls back to dispatching the standard
+  `Android CI` gate with a warning; for custom tasks it fails with guidance to merge the
+  workflow first or use `gh workflow run "Android CI" --ref <branch>`.
 - **`${{ inputs.task }}` is an injection surface.** Acceptable: dispatch requires write
   access and this is a single-owner repo. Do not expose `remote-build.yml` to unauthenticated
   or public input.
