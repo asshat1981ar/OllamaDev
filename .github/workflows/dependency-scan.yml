@@ -34,8 +34,15 @@ jobs:
           echo "Using dependency-check version $VERSION"
           curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" -o dependency-check.zip
           unzip -q dependency-check.zip -d dependency-check
-          chmod +x ./dependency-check/bin/dependency-check.sh
-          ./dependency-check/bin/dependency-check.sh --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report || true
+          # Find the extracted dependency-check script and run it; tolerate missing files so this job remains non-blocking
+          DC_SCRIPT=$(find dependency-check -type f -name 'dependency-check.sh' -print -quit || true)
+          if [ -z "$DC_SCRIPT" ]; then
+            echo "dependency-check.sh not found; listing extracted files:" >&2
+            find dependency-check -maxdepth 3 -type f -print >&2 || true
+          else
+            chmod +x "$DC_SCRIPT" || true
+            "$DC_SCRIPT" --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report || true
+          fi
 
       - name: Upload dependency-check reports
         if: always()
