@@ -56,14 +56,18 @@ class CrashLoggingApplication : Application() {
 
         // Secondary: public Downloads folder via MediaStore, readable from outside the app sandbox.
         try {
-            val resolver = contentResolver
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "ollamadev_crash_$timestamp.txt")
-                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-            }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            if (uri != null) {
-                resolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, "ollamadev_crash_$timestamp.txt")
+                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+                }
+            } else {
+                Log.i("CrashLoggingApplication", "Skipping public crash log on SDK < Q")
             }
         } catch (e: Throwable) {
             Log.e("CrashLoggingApplication", "Failed to write public crash log", e)
