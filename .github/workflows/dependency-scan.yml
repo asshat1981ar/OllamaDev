@@ -41,6 +41,7 @@ jobs:
             find dependency-check -maxdepth 3 -type f -print >&2 || true
           else
             chmod +x "$DC_SCRIPT" || true
+            mkdir -p dependency-check-report || true
             "$DC_SCRIPT" --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report || true
           fi
 
