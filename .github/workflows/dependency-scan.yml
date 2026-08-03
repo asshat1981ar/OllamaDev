@@ -1,0 +1,54 @@
+name: Dependency scan
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 4 * * 0' # weekly on Sundays at 04:00 UTC
+
+jobs:
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Grant execute for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Run OWASP dependency-check
+        run: |
+          set -e
+          echo "Fetching latest dependency-check CLI version"
+          VERSION=$(curl -s https://dependency-check.github.io/DependencyCheck/current.txt)
+          echo "Using dependency-check version $VERSION"
+          curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" -o dependency-check.zip
+          unzip -q dependency-check.zip -d dependency-check
+          # Find the extracted dependency-check script and run it; tolerate missing files so this job remains non-blocking
+          DC_SCRIPT=$(find dependency-check -type f -name 'dependency-check.sh' -print -quit || true)
+          if [ -z "$DC_SCRIPT" ]; then
+            echo "dependency-check.sh not found; listing extracted files:" >&2
+            find dependency-check -maxdepth 3 -type f -print >&2 || true
+          else
+            chmod +x "$DC_SCRIPT" || true
+            mkdir -p dependency-check-report || true
+            "$DC_SCRIPT" --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report || true
+          fi
+
+      - name: Upload dependency-check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-reports
+          path: dependency-check-report*/**
+          if-no-files-found: warn
