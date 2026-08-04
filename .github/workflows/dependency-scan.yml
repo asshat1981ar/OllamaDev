@@ -18,14 +18,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: true
-
-      - name: Grant execute for gradlew
-        run: chmod +x ./gradlew
-
       - name: Run OWASP dependency-check
         run: |
           set -e
@@ -34,16 +26,19 @@ jobs:
           echo "Using dependency-check version $VERSION"
           curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" -o dependency-check.zip
           unzip -q dependency-check.zip -d dependency-check
-          # Find the extracted dependency-check script and run it; tolerate missing files so this job remains non-blocking
-          DC_SCRIPT=$(find dependency-check -type f -name 'dependency-check.sh' -print -quit || true)
+          # Locate the dependency-check CLI. This job uses a standalone Java CLI (downloaded
+          # above), so no Gradle wrapper setup / chmod of ./gradlew is needed here.
+          DC_SCRIPT=$(find dependency-check -type f -name 'dependency-check.sh' -print -quit)
           if [ -z "$DC_SCRIPT" ]; then
-            echo "dependency-check.sh not found; listing extracted files:" >&2
-            find dependency-check -maxdepth 3 -type f -print >&2 || true
-          else
-            chmod +x "$DC_SCRIPT" || true
-            mkdir -p dependency-check-report || true
-            "$DC_SCRIPT" --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report || true
+            echo "ERROR: dependency-check.sh not found in extracted release; listing files:" >&2
+            find dependency-check -maxdepth 3 -type f -print >&2
+            exit 1
           fi
+          # Security gate: fail this job when critical-severity (CVSS >= 9.0) findings exist.
+          # Reports are still uploaded (next step, if: always()) for triage of lower-severity items.
+          mkdir -p dependency-check-report
+          chmod +x "$DC_SCRIPT"
+          "$DC_SCRIPT" --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report --failOnCVSS 9
 
       - name: Upload dependency-check reports
         if: always()

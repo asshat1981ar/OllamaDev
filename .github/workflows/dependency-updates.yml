@@ -11,5 +11,11 @@ jobs:
     with:
       task: "-Dorg.gradle.configuration-cache=false dependencyUpdates"
       artifact_name: "dependency-updates-report"
+      # The versions plugin writes its report to the root project's build/dependencyUpdates/.
+      # The reusable runner's default upload paths are app-module-scoped, so override them
+      # here to ensure the dependencyUpdates report is actually captured in the artifact.
+      upload_patterns: |
+        build/dependencyUpdates/**
+        **/build/dependencyUpdates/**
       cache_read_only: true
       timeout_minutes: 30
