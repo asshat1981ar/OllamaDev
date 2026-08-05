@@ -43,6 +43,30 @@ key is required anywhere in this app.**
 5. Run the app on an emulator or physical device, then add your Ollama node from the
    Nodes screen using the table above.
 
+## Build & release
+
+```bash
+# Debug APK (no signing config needed — the debug build type sets none)
+./gradlew :app:assembleDebug --console=plain
+```
+
+`versionCode` / `versionName` are derived from git via `scripts/version.sh`
+(`code` = commit count, `name` = latest semver tag or `1.0.0`, with a
+`-<short-sha>` suffix when the worktree is dirty). No manual version bumping.
+
+**Release builds are env-gated signed.** A `release` signing config is created
+only when `OLLAMADEV_KEYSTORE_PATH` is set in the environment; without it the
+release APK is produced **unsigned** (safe for local builds/CI). To sign:
+
+```bash
+export OLLAMADEV_KEYSTORE_PATH=/path/to/your.keystore
+export OLLAMADEV_KEYSTORE_PASS='<store-and-key-password>'
+export OLLAMADEV_KEYSTORE_ALIAS='<key-alias>'
+./gradlew :app:assembleRelease --console=plain  # add -x lintVitalRelease if lint errors
+```
+
+Keystore paths/passwords are never committed — they are environment-only.
+
 ## Troubleshooting
 
 - **Node shows offline / connection refused** — make sure `ollama serve` is running and

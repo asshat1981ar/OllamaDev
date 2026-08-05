@@ -273,7 +273,7 @@ real friction:
 **Priority:** high | **Mode:** orchestrated subagent cycles — each cycle's distilled
 outcome feeds the next task's brief (see `agent-os/plans/tier6-cycle-log.md`).
 
-- [ ] **6.1 Confirm-or-fix: AGENTIC_LOOP verify-prompt `decision` bug.**
+- [x] **6.1 Confirm-or-fix: AGENTIC_LOOP verify-prompt `decision` bug.**
       `RELEASE_NOTES.md` (PRs #7–10) flags: "verify prompt interpolates an
       unresolved `decision` variable before it is declared." Current
       `SwarmEngine.kt:416` builds `verifyPrompt` from `actResult.output`
@@ -282,6 +282,8 @@ outcome feeds the next task's brief (see `agent-os/plans/tier6-cycle-log.md`).
       test asserting the verify prompt actually contains the act-step output,
       so the flagged failure mode can't silently return. Close with verdict:
       `already-fixed` (+regression test) or `fixed-now` (+fix +test).
+      Verdict: `already-fixed` — regression test `SwarmEngineVerifyPromptTest`
+      added in `d1d6c18`. Done.
 - [x] **6.2 Resolve the orphan `WorkspaceViewModel.kt`.** 642 lines,
       untracked, referenced nowhere in `main` or `test` sources. Verdict:
       it is a stale extraction duplicate of workspace/git logic already in
@@ -296,15 +298,19 @@ outcome feeds the next task's brief (see `agent-os/plans/tier6-cycle-log.md`).
       with fake gate. *(Implemented 2026-07-30; runtime test blocked by
       WSL/Robolectric Maven download issue — see Cycle 1 in
       `agent-os/plans/tier6-cycle-log.md`.)*
-- [ ] **6.4 Room destructive-migration safeguard.**
+- [x] **6.4 Room destructive-migration safeguard.**
       `fallbackToDestructiveMigration(true)` wipes user data on version bump.
       Add either a real `MIGRATION_14_15` on next change or an export/backup
       path before upgrade. Decide + document in `docs/adr/`.
-- [ ] **6.5 Budget token heuristic precision.** Cloud-token cap uses
+      Policy documented in `docs/adr/ADR-0002-room-migration-policy.md`;
+      startup note added in `AppDatabase`/`MainActivity` (`9df041b`). Done.
+- [x] **6.5 Budget token heuristic precision.** Cloud-token cap uses
       `(prompt.length + output.length) / 2 + 100` chars heuristic. Either
       document the exact error bounds in `BudgetScreen` copy or swap for a
       real tokenizer count. Lowest priority; batch with any BudgetScreen work.
-- [ ] **6.6 LlmRouter contextual prompt augmentation.**
+      `BudgetScreen` copy now documents the character-length estimate and its
+      approximation vs. real tokenizers (`467428f`). Done.
+- [x] **6.6 LlmRouter contextual prompt augmentation.**
       `LlmRouter.buildSkillsContext()` appends only the MCP skills block to
       agent system prompts — the `WRITE_FILE:`/git directive formats that
       `AgenticActionExecutor` actually parses are undocumented to agents, a
@@ -317,4 +323,5 @@ outcome feeds the next task's brief (see `agent-os/plans/tier6-cycle-log.md`).
       unit tests per the `run-ollamadev` skill. Added 2026-07-29 per the
       augmented-team-prompt design
       (`docs/superpowers/specs/2026-07-29-augmented-team-prompt-design.md`).
+      Implemented + `LlmRouterTest` coverage in `949f28b`. Done.
 
