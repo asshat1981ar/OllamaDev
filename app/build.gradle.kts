@@ -9,6 +9,12 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// VersionScheme: derive versionCode/versionName from git via scripts/version.sh.
+val versionCodeValue = providers.exec { commandLine("bash", "scripts/version.sh", "code") }
+  .standardOutput.asText.orNull?.trim()?.toIntOrNull() ?: 1
+val versionNameValue = providers.exec { commandLine("bash", "scripts/version.sh", "name") }
+  .standardOutput.asText.orNull?.trim() ?: "1.0.0"
+
 android {
   namespace = "com.example"
   compileSdk = 34
@@ -17,8 +23,8 @@ android {
     applicationId = "com.ollamaswarm.app"
     minSdk = 24
     targetSdk = 34
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = versionCodeValue
+    versionName = versionNameValue
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
