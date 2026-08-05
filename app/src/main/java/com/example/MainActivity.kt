@@ -3,6 +3,7 @@ package com.example
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -51,6 +52,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Room migration safeguard (Tier 6.4) — see docs/adr/ADR-0002-room-migration-policy.md.
+        // Destructive migration fallback is enabled in AppDatabase as a documented last resort;
+        // a schema bump without an explicit MIGRATION_* wipes local data. Export/back up before upgrading.
+        Log.w("RoomMigration", "Destructive migration fallback enabled (ADR-0002): a Room version bump without an explicit MIGRATION_* wipes local Ollama Swarm data. Export/back up before upgrading.")
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
