@@ -24,12 +24,13 @@ android {
   }
 
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    if (System.getenv("OLLAMADEV_KEYSTORE_PATH") != null) {
+      create("release") {
+        storeFile = file(System.getenv("OLLAMADEV_KEYSTORE_PATH"))
+        storePassword = System.getenv("OLLAMADEV_KEYSTORE_PASS")
+        keyAlias = System.getenv("OLLAMADEV_KEYSTORE_ALIAS")
+        keyPassword = System.getenv("OLLAMADEV_KEYSTORE_PASS")
+      }
     }
   }
 
@@ -38,7 +39,7 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.findByName("release") // null -> unsigned when env unset
     }
     debug { }
   }
