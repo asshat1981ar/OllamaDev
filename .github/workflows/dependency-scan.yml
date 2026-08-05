@@ -19,6 +19,8 @@ jobs:
           java-version: '17'
 
       - name: Run OWASP dependency-check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           set -e
           echo "Fetching latest dependency-check CLI version"
@@ -36,9 +38,19 @@ jobs:
           fi
           # Security gate: fail this job when critical-severity (CVSS >= 9.0) findings exist.
           # Reports are still uploaded (next step, if: always()) for triage of lower-severity items.
+          #
+          # NVD feed: the NVD API requires a (free) API key; it is read from the optional
+          # NVD_API_KEY repository secret. When it is absent, the NVD feed cannot update and
+          # --failOnError false keeps the scan non-blocking (matching this workflow's intent of
+          # "upload reports, non-failing") so a missing key never red-gates a PR.
           mkdir -p dependency-check-report
           chmod +x "$DC_SCRIPT"
-          "$DC_SCRIPT" --project "OllamaDev" --scan ./ --format ALL --out dependency-check-report --failOnCVSS 9
+          DC_ARGS=(--project "OllamaDev" --scan ./ --format ALL \
+            --out dependency-check-report --failOnCVSS 9 --failOnError false)
+          if [ -n "$NVD_API_KEY" ]; then
+            DC_ARGS+=(--nvdApiKey "$NVD_API_KEY")
+          fi
+          "$DC_SCRIPT" "${DC_ARGS[@]}"
 
       - name: Upload dependency-check reports
         if: always()
