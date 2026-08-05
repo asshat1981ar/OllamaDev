@@ -59,5 +59,8 @@ object TaskBudgetTracker {
         /** Human-readable summary for a [TaskStep] or a UI snackbar. */
         fun haltReason(): String =
             "Cloud token budget halted the loop: estimated $tokensUsed tokens used (cap: $cap)."
+
+        /** Approximate tokens used, exposed for antigenic signal detail. */
+        fun approxTokensUsed(): Int = _tokensUsed
     }
 }

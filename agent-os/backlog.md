@@ -23,6 +23,12 @@ For each item:
 Don't batch multiple backlog items into one commit later — keep them
 separable, matching how PR #1 was scoped.
 
+**Tier-6 team cycles:** the orchestrator briefs each subagent with
+`agent-os/plans/team-prompt.md` (augmented standing context: carried-forward
+facts, conventions, skills/plugins map, standards digest, role prompts) + the
+backlog item + the latest cycle-log entry — see the "Cycle protocol" in
+`agent-os/plans/tier6-cycle-log.md`.
+
 ---
 
 ## Tier 1 — cheap, high leverage (do these first)
@@ -260,3 +266,55 @@ real friction:
 **Priority:** low
 
 - [x] Verify that VERIFICATION agents can emit WRITE_FILE directives via `write_workspace_file` and have them land on disk. Added `tests/test_filesystem.py` to the companion `ollamadev-mcp-server`: it registers the filesystem tools on a test `MCPServer`, calls `write_workspace_file` through `mcp.call_tool`, and asserts the file (including parent directories) appears on disk and is returned by `list_workspace_files`. All six MCP server tests (filesystem + sandbox) pass. Done.
+
+---
+
+### Tier 6 — release-notes follow-ups (circular agentic workflow)
+**Priority:** high | **Mode:** orchestrated subagent cycles — each cycle's distilled
+outcome feeds the next task's brief (see `agent-os/plans/tier6-cycle-log.md`).
+
+- [ ] **6.1 Confirm-or-fix: AGENTIC_LOOP verify-prompt `decision` bug.**
+      `RELEASE_NOTES.md` (PRs #7–10) flags: "verify prompt interpolates an
+      unresolved `decision` variable before it is declared." Current
+      `SwarmEngine.kt:416` builds `verifyPrompt` from `actResult.output`
+      declared at :397 — the bug *looks* already fixed. Task: confirm with
+      evidence (compile + targeted test), and regardless add a regression
+      test asserting the verify prompt actually contains the act-step output,
+      so the flagged failure mode can't silently return. Close with verdict:
+      `already-fixed` (+regression test) or `fixed-now` (+fix +test).
+- [x] **6.2 Resolve the orphan `WorkspaceViewModel.kt`.** 642 lines,
+      untracked, referenced nowhere in `main` or `test` sources. Verdict:
+      it is a stale extraction duplicate of workspace/git logic already in
+      `SwarmViewModel.kt`; recommendation is to delete it. See
+      `agent-os/plans/workspace-viewmodel-verdict.md`. (Production deletion
+      is a separate, low-risk cleanup task.) Done.
+- [x] **6.3 Background-service approval-gate deadlock.** `AgenticLoopService`
+      blocks forever if a git-push/MCP approval gate fires headless (dialog
+      can't show from a service). Design + implement a headless policy:
+      auto-decline risky directives, record `APPROVAL_SKIPPED_HEADLESS`
+      TaskStep, and surface in the completion notification. Verify: unit test
+      with fake gate. *(Implemented 2026-07-30; runtime test blocked by
+      WSL/Robolectric Maven download issue — see Cycle 1 in
+      `agent-os/plans/tier6-cycle-log.md`.)*
+- [ ] **6.4 Room destructive-migration safeguard.**
+      `fallbackToDestructiveMigration(true)` wipes user data on version bump.
+      Add either a real `MIGRATION_14_15` on next change or an export/backup
+      path before upgrade. Decide + document in `docs/adr/`.
+- [ ] **6.5 Budget token heuristic precision.** Cloud-token cap uses
+      `(prompt.length + output.length) / 2 + 100` chars heuristic. Either
+      document the exact error bounds in `BudgetScreen` copy or swap for a
+      real tokenizer count. Lowest priority; batch with any BudgetScreen work.
+- [ ] **6.6 LlmRouter contextual prompt augmentation.**
+      `LlmRouter.buildSkillsContext()` appends only the MCP skills block to
+      agent system prompts — the `WRITE_FILE:`/git directive formats that
+      `AgenticActionExecutor` actually parses are undocumented to agents, a
+      real gap. Task: extend the appended context (scoped to
+      `generateForAgent` only — `generateFreeform`/`routePrompt` callers such
+      as the routing orchestrator, consensus moderator, and distillation stay
+      clean) with a compact directive reference + approval-gate awareness +
+      one-line standards reminder. Char-budget conscious (see 6.5). Verify:
+      TDD via the `LlmRouterTest`/`FakeAppDatabase` pattern; build + targeted
+      unit tests per the `run-ollamadev` skill. Added 2026-07-29 per the
+      augmented-team-prompt design
+      (`docs/superpowers/specs/2026-07-29-augmented-team-prompt-design.md`).
+

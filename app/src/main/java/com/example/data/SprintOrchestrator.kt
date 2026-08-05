@@ -144,6 +144,17 @@ class SprintOrchestrator(
                 if (phase == SprintPhase.VERIFICATION && currentUnresolved > UNRESOLVED_REQUEUE_THRESHOLD) {
                     val currentCycle = db.sprintCycleDao().getCycleById(cycleId) ?: break
                     if (currentCycle.reimplCount < MAX_REIMPL_COUNT) {
+                        AntigenicSignalStore.recordSignal(
+                            AntigenicSignal(
+                                cycleId = cycleId,
+                                severity = AntigenicSeverity.WARNING,
+                                category = AntigenicCategory.QUALITY,
+                                source = "SprintOrchestrator",
+                                signalType = "VERIFICATION_UNRESOLVED",
+                                message = "Verification phase triggered IMPLEMENTATION re-run",
+                                detail = "unresolved=$currentUnresolved reimplCount=${currentCycle.reimplCount}",
+                            )
+                        )
                         db.sprintCycleDao().updateCycle(
                             currentCycle.copy(reimplCount = currentCycle.reimplCount + 1)
                         )
