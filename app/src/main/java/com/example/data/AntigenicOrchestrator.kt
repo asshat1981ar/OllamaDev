@@ -15,13 +15,18 @@ import kotlinx.coroutines.flow.onEach
  * every time the store emits a new value.
  */
 object AntigenicOrchestrator {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val defaultScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val inFlight = mutableSetOf<Long>()
 
     /** Injectable for tests. Defaults to a logging stub. */
     var launcher: SubagentLauncher = LoggingSubagentLauncher
 
-    fun startObserving() {
+    /**
+     * Starts observing [AntigenicSignalStore]. The collector runs on [scope] so tests can pass
+     * their own test-controlled scope (`TestScope.backgroundScope`) instead of the production
+     * [Dispatchers.Default] scope, which the test scheduler cannot drive.
+     */
+    fun startObserving(scope: CoroutineScope = defaultScope) {
         AntigenicSignalStore.unresolvedSignals
             .onEach { signals ->
                 signals.filter { it.resolvedAt == null && inFlight.add(it.id) }

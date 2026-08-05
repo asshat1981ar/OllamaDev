@@ -31,7 +31,7 @@ class AntigenicOrchestratorTest {
     fun `headless skip signal delegates fix subagent`() = runTest(UnconfinedTestDispatcher()) {
         val launcher = RecordingLauncher()
         AntigenicOrchestrator.launcher = launcher
-        AntigenicOrchestrator.startObserving()
+        AntigenicOrchestrator.startObserving(backgroundScope)
 
         val signal = AntigenicSignal(
             category = AntigenicCategory.SAFETY,
@@ -42,13 +42,13 @@ class AntigenicOrchestratorTest {
             message = "Approval skipped in headless mode",
             detail = "risky git push",
         )
-        AntigenicSignalStore.recordSignal(signal)
+        val recorded = AntigenicSignalStore.recordSignal(signal)
 
         advanceUntilIdle()
 
         assertEquals(1, launcher.calls.size)
         val call = launcher.calls.first()
-        assertEquals(signal.id, call.first)
+        assertEquals(recorded.id, call.first)
         assertTrue(call.second.contains("headless-approval.md"))
         assertEquals("42", call.third["taskId"])
     }
@@ -57,9 +57,10 @@ class AntigenicOrchestratorTest {
     fun `in flight guard prevents duplicate dispatch`() = runTest(UnconfinedTestDispatcher()) {
         val launcher = RecordingLauncher()
         AntigenicOrchestrator.launcher = launcher
-        AntigenicOrchestrator.startObserving()
+        AntigenicOrchestrator.startObserving(backgroundScope)
 
         val signal = AntigenicSignal(
+            id = 99L, // stable id so both store entries are "the same signal"
             category = AntigenicCategory.SAFETY,
             signalType = "APPROVAL_SKIPPED_HEADLESS",
             severity = AntigenicSeverity.WARNING,
@@ -81,7 +82,7 @@ class AntigenicOrchestratorTest {
     fun `generic signal falls back to generic brief`() = runTest(UnconfinedTestDispatcher()) {
         val launcher = RecordingLauncher()
         AntigenicOrchestrator.launcher = launcher
-        AntigenicOrchestrator.startObserving()
+        AntigenicOrchestrator.startObserving(backgroundScope)
 
         val signal = AntigenicSignal(
             category = AntigenicCategory.QUALITY,
