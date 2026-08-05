@@ -67,15 +67,20 @@ connection):
 
 | Tool | Purpose |
 | --- | --- |
-| `cf_workspace_status` | Connectivity + config snapshot |
+| `cf_workspace_status` | Connectivity + config + circuit-breaker health |
 | `cf_list_workspace` | List a directory (via exec surface) |
-| `cf_read_workspace_file` | Read a file from the virtual workspace |
-| `cf_write_workspace_file` | Write/overwrite a file |
-| `cf_exec_workspace` | Run a shell command in the backend (gated) |
-| `cf_git_workspace` | Run `git` in the workspace (gated) |
+| `cf_read_workspace_file` | Read a file (base64 for binary via `binary=True`; 2 MiB cap) |
+| `cf_write_workspace_file` | Write/overwrite a file (`content=` or base64 `content_b64=`; audited) |
+| `cf_exec_workspace` | Run a shell command or safely-quoted `argv` (gated + audited) |
+| `cf_git_workspace` | Run a validated `git` subcommand in the workspace (gated if mutating + audited) |
 
 `cf_exec_workspace` and `cf_git_workspace` are annotated `destructiveHint=true`
-so OllamaDev's MCP risk gate requires human approval before they run.
+so OllamaDev's MCP risk gate requires human approval before they run. The module
+also validates config (http(s) base URL, workspace name charset, bounded
+timeouts), retries transient network errors with backoff, gates a broken
+endpoint behind a circuit breaker, sanitizes paths (rejects `..`, control
+chars), refuses shell metacharacters in `git` args, and caps exec output at
+256 KiB — see the mcp-server README for details.
 
 ## Status
 
