@@ -21,3 +21,10 @@ debug.keystore
 ollama.log
 # Downloads from scripts/delegate-build.sh
 ci-artifacts/
+# Local tooling state (never useful in-repo)
+.opencode/
+.cline/plugins/
+.cline/settings/
+# Agent runtime store (tool-call history etc.)
+store/tool_call_history.json
+
