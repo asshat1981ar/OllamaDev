@@ -86,6 +86,11 @@ abstract class AppDatabase : RoomDatabase(), AppDatabaseInterface {
                     AppDatabase::class.java,
                     "ollama_swarm_database"
                 )
+                // Room migration safeguard (Tier 6.4) — see docs/adr/ADR-0002-room-migration-policy.md.
+                // A schema-version bump MUST ship an explicit MIGRATION_* (e.g. MIGRATION_13_14 below).
+                // fallbackToDestructiveMigration is retained ONLY as a documented last-resort safety
+                // net: a missed/broken migration wipes local data instead of crashing on every launch.
+                // It wipes data on an unhandled bump, so export/back up before upgrading.
                 .fallbackToDestructiveMigration(true)
                 .addMigrations(MIGRATION_13_14)
                 .addCallback(DatabaseSeederCallback())

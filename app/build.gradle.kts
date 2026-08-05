@@ -9,6 +9,12 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// VersionScheme: derive versionCode/versionName from git via scripts/version.sh.
+val versionCodeValue = providers.exec { commandLine("bash", "scripts/version.sh", "code") }
+  .standardOutput.asText.orNull?.trim()?.toIntOrNull() ?: 1
+val versionNameValue = providers.exec { commandLine("bash", "scripts/version.sh", "name") }
+  .standardOutput.asText.orNull?.trim() ?: "1.0.0"
+
 android {
   namespace = "com.example"
   compileSdk = 34
@@ -17,19 +23,20 @@ android {
     applicationId = "com.ollamaswarm.app"
     minSdk = 24
     targetSdk = 34
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = versionCodeValue
+    versionName = versionNameValue
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    if (System.getenv("OLLAMADEV_KEYSTORE_PATH") != null) {
+      create("release") {
+        storeFile = file(System.getenv("OLLAMADEV_KEYSTORE_PATH"))
+        storePassword = System.getenv("OLLAMADEV_KEYSTORE_PASS")
+        keyAlias = System.getenv("OLLAMADEV_KEYSTORE_ALIAS")
+        keyPassword = System.getenv("OLLAMADEV_KEYSTORE_PASS")
+      }
     }
   }
 
@@ -38,7 +45,7 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.findByName("release") // null -> unsigned when env unset
     }
     debug { }
   }

@@ -17,7 +17,7 @@ class LlmRouter(
         preferCloud: Boolean,
         onToken: (suspend (String) -> Unit)?
     ): String {
-        val systemPromptWithSkills = agent.systemPrompt + buildSkillsContext()
+        val systemPromptWithSkills = agent.systemPrompt + buildSkillsContext() + buildDirectiveContext()
         return generateFromFallbackPool(prompt, systemPromptWithSkills, preferredModelName = agent.modelName, preferCloud = preferCloud, onToken = onToken)
     }
 
@@ -45,6 +45,21 @@ class LlmRouter(
             ""
         }
     }
+
+    /**
+     * Compact reference to the action directives [AgenticActionExecutor] parses out of agent output
+     * (WRITE_FILE / MCP_CALL / git), approval-gate awareness, and a one-line standards reminder.
+     * Scoped to [generateForAgent] only -- freeform/routePrompt callers (routing orchestrator,
+     * consensus moderator, distillation) are intentionally NOT given these, so their prompts stay
+     * clean. Appended after the skills block; deliberately terse to respect the prompt's char budget.
+     */
+    private fun buildDirectiveContext(): String =
+        "\n[AGENT DIRECTIVES: lines the executor acts on]\n" +
+        "- WRITE_FILE: <path> - write that file (content diff goes through human review)\n" +
+        "- MCP_CALL: <tool name> | <json arguments object> - invoke a connected MCP tool\n" +
+        "- git <subcommand> - run a git command (e.g. 'git commit -am \"msg\"', 'git push')\n" +
+        "Approval gate: 'git push' and risky/destructive MCP calls pause for human approval; declined actions are skipped.\n" +
+        "Standards: follow the repo's coding standards and verify your own output before emitting directives.\n"
 
     /**
      * Selects an online Ollama node and generates a response. When [preferredModelName] is given,

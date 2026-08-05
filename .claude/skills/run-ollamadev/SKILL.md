@@ -141,6 +141,27 @@ and the new `ScreenshotDriverTest` (4 tests) in isolation.
 
 ## Gotchas
 
+- **WSL IPv4 loopback is broken — every Gradle JVM needs
+  `JAVA_TOOL_OPTIONS='-Djava.net.preferIPv6Addresses=true'`** (verified 2026-07-29):
+  without it the client dies with "Could not connect to the Gradle daemon" because
+  127.0.0.1 connect() is refused while ::1 works. Gradle 9 ALWAYS forks a daemon
+  (even `--no-daemon` forks a single-use one), so in-process fallback is not an
+  option. Prefix every `./gradlew` invocation with the env var. Do not "fix" this
+  by editing `gradle.properties` — the env var reaches both client and daemon JVMs.
+  **But the flag also breaks external HTTPS** (Java then prefers unroutable IPv6
+  for Maven Central too), so any dependency not already in
+  `~/.gradle/caches/modules-2` fails to download. Fix: download the missing
+  pom+jar over IPv4 with `curl -4` into a file-repo (`/tmp/m2repo/<group-path>/…`)
+  and inject it FIRST (settings are FAIL_ON_PROJECT_REPOS) via an init script:
+  `./gradlew -I /tmp/local-repo.init.gradle …` where the script does
+  `settingsEvaluated { s -> def r = s.dependencyResolutionManagement.repositories;
+   def m = r.maven { url = uri('file:///tmp/m2repo') }; r.remove(m); r.add(0, m) }`
+  (same for `pluginManagement.repositories`). `jdk.net.hosts.file` is NOT a
+  viable alternative (Java then bypasses WSL's DNS tunnel and all DNS dies);
+  `--offline` fails too (Gradle needs module metadata, not just planted files).
+- **JDK 21 is gone; only OpenJDK 17 (`/usr/lib/jvm/java-17-openjdk-amd64`) exists**
+  (verified 2026-07-29). The build works on 17 — ignore the "JDK 21" prerequisite
+  above; `JAVA_HOME` is unset and that's fine.
 - **No emulator is possible here, full stop.** No `emulator` binary in the SDK, no
   AVDs, no `/dev/kvm`. Don't burn time trying `avdmanager create avd` + `emulator
   -avd ...` — it was checked and there's nothing to boot it on. The Robolectric route
