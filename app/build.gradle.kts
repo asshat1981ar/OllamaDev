@@ -10,10 +10,20 @@ plugins {
 }
 
 // VersionScheme: derive versionCode/versionName from git via scripts/version.sh.
-val versionCodeValue = providers.exec { commandLine("bash", "scripts/version.sh", "code") }
-  .standardOutput.asText.orNull?.trim()?.toIntOrNull() ?: 1
-val versionNameValue = providers.exec { commandLine("bash", "scripts/version.sh", "name") }
-  .standardOutput.asText.orNull?.trim() ?: "1.0.0"
+// On Windows, bash may require elevation or not be in PATH, so provide sensible fallbacks.
+val versionCodeValue = try {
+  providers.exec { commandLine("bash", "scripts/version.sh", "code") }
+    .standardOutput.asText.orNull?.trim()?.toIntOrNull()
+} catch (e: Exception) {
+  null
+} ?: 1
+
+val versionNameValue = try {
+  providers.exec { commandLine("bash", "scripts/version.sh", "name") }
+    .standardOutput.asText.orNull?.trim()
+} catch (e: Exception) {
+  null
+} ?: "1.0.0"
 
 android {
   namespace = "com.example"
