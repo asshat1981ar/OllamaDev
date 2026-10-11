@@ -13,7 +13,13 @@ class AgenticActionExecutor(
     private val appContext: Context,
     private val securePrefs: SecurePrefsInterface,
     private val llmRouter: LlmRouterInterface,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * When true the executor is running in a headless context (e.g. from [AgenticLoopService])
+     * where no UI approval dialog can be shown. Any action that would require human approval is
+     * auto-declined and recorded as [APPROVAL_SKIPPED_HEADLESS] instead of suspending forever.
+     */
+    private val isHeadless: Boolean = false
 ) : AgenticActionExecutorInterface {
 
     override suspend fun parseAndExecute(
@@ -126,12 +132,21 @@ class AgenticActionExecutor(
             }
 
             setAwaitingApproval(true)
-            val approved = PendingApprovalStore.requestApproval(
-                taskId, agentName, ApprovalRiskCategory.GIT_PUSH,
-                "Push local commits to remote ($remoteUrl) requested by $agentName"
-            )
+            val approved = if (isHeadless) {
+                recordHeadlessApprovalSkipped(taskId, agentName, "git push to $remoteUrl")
+                false
+            } else {
+                PendingApprovalStore.requestApproval(
+                    taskId, agentName, ApprovalRiskCategory.GIT_PUSH,
+                    "Push local commits to remote ($remoteUrl) requested by $agentName"
+                )
+            }
             setAwaitingApproval(false)
             if (!approved) {
+                if (isHeadless) {
+                    // Headless skip was already recorded as APPROVAL_SKIPPED_HEADLESS.
+                    return
+                }
                 db.taskStepDao().insertStep(
                     TaskStep(
                         taskId = taskId,
@@ -139,6 +154,17 @@ class AgenticActionExecutor(
                         agentRole = "System",
                         actionType = "ACTION_DECLINED",
                         content = "Push requested by $agentName was declined by user."
+                    )
+                )
+                AntigenicSignalStore.recordSignal(
+                    AntigenicSignal(
+                        taskId = taskId,
+                        severity = AntigenicSeverity.WARNING,
+                        category = AntigenicCategory.SAFETY,
+                        source = "AgenticActionExecutor",
+                        signalType = "APPROVAL_DECLINED",
+                        message = "Git push approval was declined",
+                        detail = "remote=$remoteUrl agent=$agentName",
                     )
                 )
                 return
@@ -245,17 +271,52 @@ class AgenticActionExecutor(
                     content = "$agentName requested '${skill.name}' ($toolName) on ${server.name}: $riskReason"
                 )
             )
-            setAwaitingApproval(true)
-            val approved = PendingApprovalStore.requestApproval(
-                taskId, agentName, ApprovalRiskCategory.MCP_DESTRUCTIVE_CALL,
-                "Call '${skill.name}' ($toolName) on ${server.name}",
-                detail = "$riskReason\n\nArgs: $argsJson"
+            AntigenicSignalStore.recordSignal(
+                AntigenicSignal(
+                    taskId = taskId,
+                    severity = AntigenicSeverity.WARNING,
+                    category = AntigenicCategory.SAFETY,
+                    source = "AgenticActionExecutor",
+                    signalType = "MCP_RISKY_CALL",
+                    message = "Risky MCP call gated for approval",
+                    detail = "skill=${skill.name} tool=$toolName server=${server.name} reason=$riskReason",
+                )
             )
+            setAwaitingApproval(true)
+            val approved = if (isHeadless) {
+                recordHeadlessApprovalSkipped(taskId, agentName, "destructive MCP call '${skill.name}'")
+                false
+            } else {
+                PendingApprovalStore.requestApproval(
+                    taskId, agentName, ApprovalRiskCategory.MCP_DESTRUCTIVE_CALL,
+                    "Call '${skill.name}' ($toolName) on ${server.name}",
+                    detail = "$riskReason\n\nArgs: $argsJson"
+                )
+            }
             setAwaitingApproval(false)
             if (!approved) {
+                if (isHeadless) {
+                    // Headless skip was already recorded as APPROVAL_SKIPPED_HEADLESS.
+                    return Result.failure(
+                        IllegalStateException(
+                            "$agentName's call to '${skill.name}' ($toolName) was skipped because the task is running headless."
+                        )
+                    )
+                }
                 val message = "$agentName's call to '${skill.name}' ($toolName) was declined by user."
                 db.taskStepDao().insertStep(
                     TaskStep(taskId = taskId, agentName = "MCP Tool", agentRole = "System", actionType = "ACTION_DECLINED", content = message)
+                )
+                AntigenicSignalStore.recordSignal(
+                    AntigenicSignal(
+                        taskId = taskId,
+                        severity = AntigenicSeverity.WARNING,
+                        category = AntigenicCategory.SAFETY,
+                        source = "AgenticActionExecutor",
+                        signalType = "APPROVAL_DECLINED",
+                        message = "MCP approval was declined",
+                        detail = "skill=${skill.name} tool=$toolName agent=$agentName",
+                    )
                 )
                 return Result.failure(IllegalStateException(message))
             }
@@ -352,7 +413,12 @@ class AgenticActionExecutor(
             agentName = agentName,
             changes = changes
         )
-        val decisions = PendingApprovalStore.requestFileChangeBatchReview(batch)
+        val decisions = if (isHeadless) {
+            recordHeadlessApprovalSkipped(taskId, agentName, "${changes.size} file-change(s)")
+            changes.associate { it.filePath to false }
+        } else {
+            PendingApprovalStore.requestFileChangeBatchReview(batch)
+        }
 
         changes.forEach { change ->
             val approved = decisions[change.filePath] ?: false
@@ -404,6 +470,34 @@ class AgenticActionExecutor(
         return required.filter { argName ->
             arguments[argName] == null || arguments[argName] == "" || arguments[argName] == emptyList<Any>()
         }
+    }
+
+    /**
+     * Records a headless-mode skip step when an action that would normally require human
+     * approval cannot be shown in a UI. This prevents the background service from deadlocking
+     * on an approval dialog and gives the user an auditable trace of what was skipped.
+     */
+    private suspend fun recordHeadlessApprovalSkipped(taskId: Int, agentName: String, actionDescription: String) {
+        db.taskStepDao().insertStep(
+            TaskStep(
+                taskId = taskId,
+                agentName = agentName,
+                agentRole = "System",
+                actionType = "APPROVAL_SKIPPED_HEADLESS",
+                content = "Skipped approval for $actionDescription because the task is running headless."
+            )
+        )
+        AntigenicSignalStore.recordSignal(
+            AntigenicSignal(
+                taskId = taskId,
+                severity = AntigenicSeverity.CRITICAL,
+                category = AntigenicCategory.SAFETY,
+                source = "AgenticActionExecutor",
+                signalType = "APPROVAL_SKIPPED_HEADLESS",
+                message = "Approval skipped because the task is running headless",
+                detail = "action=$actionDescription",
+            )
+        )
     }
 
     private fun parseJsonArguments(argsJson: String): Map<String, Any?> {

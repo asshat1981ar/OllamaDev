@@ -102,6 +102,7 @@ private fun stepIconAndColorFor(actionType: String): Pair<androidx.compose.ui.gr
     "VERIFYING", "EXEC_RESULT" -> Icons.AutoMirrored.Rounded.FactCheck to Color(0xFF009688)
     "EXEC_RESULT_FAILED", "MCP_CALL_FAILED", "ACTION_DECLINED", "FILE_CHANGE_REJECTED",
     "GIT_COMMIT_FAILED", "GIT_PUSH_FAILED", "BUDGET_HALT" -> Icons.Rounded.Error to Color(0xFFEF4444)
+    "APPROVAL_SKIPPED_HEADLESS" -> Icons.Rounded.NotificationsOff to Color(0xFFF59E0B)
     "MCP_TOOL_CALL", "MCP_CALL_GATED" -> Icons.Rounded.Memory to Color(0xFFFF9800)
     "GIT_COMMIT", "CHECKPOINT_COMMIT" -> Icons.Rounded.Commit to Color(0xFF4CAF50)
     "GIT_PUSH" -> Icons.Rounded.CloudUpload to Color(0xFF4CAF50)

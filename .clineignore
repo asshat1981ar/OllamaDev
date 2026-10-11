@@ -1,0 +1,16 @@
+# Secrets and local machine config — never readable by Cline
+.env
+.env.*
+!.env.example
+local.properties
+*.keystore
+debug.keystore
+
+# Guard test area (also gitignored)
+captures/
+
+# Large/generated dirs not useful to the agent
+.gradle/
+.cxx/
+.externalNativeBuild/
+build/

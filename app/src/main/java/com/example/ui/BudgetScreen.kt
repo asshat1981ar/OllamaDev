@@ -88,7 +88,7 @@ fun BudgetScreen(
                     modifier = Modifier.size(20.dp)
                 )
                 Text(
-                    text = "The agentic loop stops starting new iterations once the estimated token count reaches this cap. In-progress calls are allowed to finish. Set to 0 to disable the guardrail.",
+                    text = "Token counts are estimates derived from character length ((prompt + output) / 2 + 100), not a real tokenizer, so actual usage may vary. The loop stops starting new iterations once the estimate reaches this cap; an in-progress call is allowed to finish and may exceed it. Set to 0 for the legacy unlimited behavior.",
                     style = MaterialTheme.typography.bodySmall,
                     lineHeight = 18.sp
                 )

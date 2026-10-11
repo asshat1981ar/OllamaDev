@@ -33,8 +33,10 @@ erDiagram
     }
 ```
 
-`AppDatabase` version `12 → 13`, no `Migration` class needed
-(`fallbackToDestructiveMigration(true)` already configured).
+`AppDatabase` is at Room `version = 14` with an explicit `MIGRATION_13_14`.
+Migration policy (destructive fallback is qualified; every `version` bump MUST
+ship an explicit `MIGRATION_*`) is documented in
+`docs/adr/ADR-0002-room-migration-policy.md`.
 
 ### New `TaskStep.actionType` values
 

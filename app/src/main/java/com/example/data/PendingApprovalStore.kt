@@ -14,7 +14,10 @@ data class PendingApproval(
     val agentName: String,
     val riskCategory: ApprovalRiskCategory,
     val description: String,
-    val detail: String = ""
+    val detail: String = "",
+    /** True when the request was issued from a headless context (e.g. [AgenticLoopService]) and
+     *  cannot be shown in a UI dialog. In that case the approval request is auto-declined. */
+    val isHeadless: Boolean = false
 )
 
 data class PendingFileChange(
@@ -54,11 +57,12 @@ object PendingApprovalStore {
         agentName: String,
         riskCategory: ApprovalRiskCategory,
         description: String,
-        detail: String = ""
+        detail: String = "",
+        isHeadless: Boolean = false
     ): Boolean {
         val deferred = CompletableDeferred<Boolean>()
         approvalDeferred = deferred
-        _pendingApproval.value = PendingApproval(idCounter.incrementAndGet(), taskId, agentName, riskCategory, description, detail)
+        _pendingApproval.value = PendingApproval(idCounter.incrementAndGet(), taskId, agentName, riskCategory, description, detail, isHeadless)
         val result = deferred.await()
         _pendingApproval.value = null
         approvalDeferred = null

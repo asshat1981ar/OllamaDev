@@ -59,7 +59,7 @@ private class BudgetGuardrailScriptedOllamaService(
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [34])
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class SwarmEngineBudgetGuardrailTest {
 
@@ -139,6 +139,11 @@ class SwarmEngineBudgetGuardrailTest {
         assertTrue(
             "Expected remaining todos to be marked [BUDGET HALT] in the plan content; last plan: ${steps.lastOrNull { it.actionType == "PLAN" }?.content}",
             steps.any { it.actionType == "PLAN" && it.content.contains("[BUDGET HALT]") }
+        )
+        val signals = AntigenicSignalStore.unresolvedSignals.value
+        assertTrue(
+            "Expected a BUDGET_OVERRUN antigenic signal; got: ${signals.map { it.signalType }}",
+            signals.any { it.signalType == "BUDGET_OVERRUN" }
         )
     }
 

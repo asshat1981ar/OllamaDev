@@ -16,13 +16,16 @@ class SwarmEngine(
     private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
     private val budgetTrackerFactory: (SharedPreferences) -> TaskBudgetTracker.Ledger = { prefs ->
         TaskBudgetTracker.Ledger(TaskBudgetTracker.readCloudTokenCap(prefs))
-    }
+    },
+    /** True when the engine is running in a headless context (e.g. background service) where
+     *  no UI approval dialogs can be shown. Forwarded to [AgenticActionExecutor]. */
+    private val isHeadless: Boolean = false
 ) {
 
     // ORDER MATTERS: actionExecutor depends on llmRouter, stepRunner depends on both.
     // Property initializers in Kotlin run top-to-bottom in declaration order; reordering breaks init.
     private val llmRouter: LlmRouterInterface = LlmRouter(ollamaService, db.ollamaNodeDao(), db.claudeSkillDao(), securePrefs, dispatcher)
-    private val actionExecutor: AgenticActionExecutorInterface = AgenticActionExecutor(db, gitService, mcpClient, appContext, securePrefs, llmRouter, dispatcher)
+    private val actionExecutor: AgenticActionExecutorInterface = AgenticActionExecutor(db, gitService, mcpClient, appContext, securePrefs, llmRouter, dispatcher, isHeadless)
     private val stepRunner: StepRunner = StepRunner(db.taskStepDao(), llmRouter, actionExecutor)
 
     suspend fun executeTask(
@@ -377,6 +380,17 @@ class SwarmEngine(
                         content = budgetLedger.haltReason()
                     )
                 )
+                AntigenicSignalStore.recordSignal(
+                    AntigenicSignal(
+                        taskId = taskId,
+                        severity = AntigenicSeverity.CRITICAL,
+                        category = AntigenicCategory.BUDGET,
+                        source = "TaskBudgetTracker",
+                        signalType = "BUDGET_OVERRUN",
+                        message = "Cloud token budget halted the loop",
+                        detail = "estimated=${budgetLedger.approxTokensUsed()} cap=${budgetLedger.cap}",
+                    )
+                )
                 todos = todos.map { if (it.done) it else it.copy(text = "${it.text} [BUDGET HALT]") }
                 db.taskStepDao().insertStep(
                     TaskStep(id = planStepId, taskId = taskId, agentName = planningAgent.name, agentRole = planningAgent.role, actionType = "PLAN", content = renderChecklist())
@@ -450,6 +464,19 @@ class SwarmEngine(
                 todos = todos.map { if (it === next) it.copy(retries = it.retries + 1) else it }
             } else {
                 val finalText = if (looksFailed) "${next.text} [UNRESOLVED after $maxRetriesPerTodo attempts]" else next.text
+                if (looksFailed) {
+                    AntigenicSignalStore.recordSignal(
+                        AntigenicSignal(
+                            taskId = taskId,
+                            severity = AntigenicSeverity.WARNING,
+                            category = AntigenicCategory.QUALITY,
+                            source = "SwarmEngine",
+                            signalType = "VERIFICATION_UNRESOLVED",
+                            message = "Verification step unresolved after retries",
+                            detail = "todo=${next.text} retries=$maxRetriesPerTodo",
+                        )
+                    )
+                }
                 todos = todos.map { if (it === next) it.copy(done = true, text = finalText) else it }
                 if (!looksFailed) {
                     autoCheckpoint(taskId, agentId = qaAgent.id, agentName = qaAgent.name, todoText = next.text)

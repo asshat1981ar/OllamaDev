@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OllamaDev Dashboard</title>
+<style>
+:root {
+  --bg: #0F0F12;
+  --surface: #13131A;
+  --panel: #1A1A22;
+  --elevated: #1E1E24;
+  --border: #2C2C30;
+  --border-strong: #3F3F46;
+  --text: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #71717A;
+  --accent: #7C3AED;
+  --accent-light: #A78BFA;
+  --accent-dark: #5B21B6;
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --radius: 10px;
+  --font: Inter, ui-sans-serif, system-ui, sans-serif;
+  --mono: "SF Mono", Monaco, "Cascadia Code", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; line-height: 1.45; overflow: hidden; }
+.app { display: grid; grid-template-columns: 56px 260px 1fr 340px; height: 100vh; }
+.rail { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 18px; }
+.rail-brand { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); display: grid; place-items: center; font-weight: 800; font-size: 16px; margin-bottom: 8px; }
+.rail-btn { width: 36px; height: 36px; border-radius: var(--radius); display: grid; place-items: center; color: var(--text-muted); cursor: pointer; }
+.rail-btn:hover, .rail-btn.active { background: var(--elevated); color: var(--text); }
+.rail-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 18px; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.section { padding: 14px 16px; border-bottom: 1px solid var(--border); min-height: 0; display: flex; flex-direction: column; }
+.section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 10px; }
+.section-body { overflow-y: auto; }
+.swarm-item { padding: 10px; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer; margin-bottom: 6px; }
+.swarm-item:hover { background: var(--panel); }
+.swarm-item.active { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.35); }
+.swarm-name { font-weight: 600; }
+.swarm-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.agent-row { display: flex; align-items: center; gap: 8px; padding: 7px 6px; border-radius: 6px; }
+.agent-dot { width: 7px; height: 7px; border-radius: 50%; }
+.agent-dot.idle { background: var(--text-muted); }
+.agent-dot.active { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.agent-dot.waiting { background: var(--warning); }
+.agent-name { flex: 1; color: var(--text-secondary); }
+.agent-role { font-size: 10px; color: var(--text-muted); font-family: var(--mono); }
+.main { display: flex; flex-direction: column; min-width: 0; }
+.header { height: 52px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 18px; background: var(--surface); }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.btn:hover { background: var(--elevated); color: var(--text); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chat { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.message { max-width: 92%; display: flex; flex-direction: column; gap: 6px; }
+.message.user { align-self: flex-end; align-items: flex-end; }
+.message-meta { font-size: 11px; color: var(--text-muted); }
+.bubble { padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); color: var(--text); white-space: pre-wrap; }
+.message.user .bubble { background: var(--accent-dark); border-color: rgba(124,58,237,0.45); }
+.step-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+.step-badge { font-size: 10px; font-weight: 700; font-family: var(--mono); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+.badge-plan { background: rgba(156,39,176,0.15); color: #CE93D8; }
+.badge-output { background: rgba(33,150,243,0.12); color: #64B5F6; }
+.badge-tool { background: rgba(255,152,0,0.12); color: #FFB74D; }
+.badge-commit { background: rgba(76,175,80,0.12); color: #81C784; }
+.composer { border-top: 1px solid var(--border); padding: 14px 18px; background: var(--surface); }
+.composer-input-wrap { display: flex; align-items: flex-end; gap: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.composer-input-wrap:focus-within { border-color: var(--accent); }
+textarea { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-family: var(--font); font-size: 13px; resize: none; max-height: 160px; }
+.icon-btn { width: 32px; height: 32px; border-radius: 50%; border: none; background: transparent; color: var(--text-muted); cursor: pointer; display: grid; place-items: center; }
+.icon-btn:hover { background: var(--elevated); color: var(--text); }
+.icon-btn.primary { background: var(--accent); color: #fff; }
+.workspace { background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+.tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); }
+.tab { padding: 10px 14px; font-size: 12px; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.editor { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.editor-header { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--text-secondary); }
+.editor-body { flex: 1; overflow: auto; background: var(--bg); }
+pre { margin: 0; padding: 14px; font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--text); min-height: 100%; }
+.tree { padding: 10px 8px; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
+.tree-node { padding: 5px 8px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+.tree-node:hover { background: var(--panel); color: var(--text); }
+.tree-node.active { background: rgba(124,58,237,0.15); color: var(--text); }
+.drop-overlay { position: fixed; inset: 0; background: rgba(15,15,18,0.85); backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center; z-index: 100; flex-direction: column; }
+.drop-overlay.active { display: flex; }
+.drop-card { border: 2px dashed var(--accent); border-radius: var(--radius); padding: 40px 60px; text-align: center; background: var(--surface); }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+@media (max-width: 1200px) { .app { grid-template-columns: 56px 220px 1fr 280px; } }
+@media (max-width: 900px) { .app { grid-template-columns: 56px 0 1fr 0; } .sidebar, .workspace { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <div class="rail-brand">O</div>
+    <div class="rail-btn active" title="Session">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <div class="rail-btn" title="Sprints">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    </div>
+    <div class="rail-btn" title="Manage">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    </div>
+    <div class="rail-btn" title="Analytics">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+    </div>
+    <div class="rail-bottom">
+      <div class="rail-btn" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </div>
+    </div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="section" style="flex:0 0 auto;">
+      <div class="section-title">Swarms</div>
+      <div class="section-body" id="swarmList"></div>
+    </div>
+    <div class="section" style="flex:1;">
+      <div class="section-title">Agents</div>
+      <div class="section-body" id="agentList"></div>
+    </div>
+    <div class="section" style="flex:0 0 auto; border-bottom:none;">
+      <div class="section-title">Nodes</div>
+      <div class="section-body" id="nodeList"></div>
+    </div>
+  </aside>
+
+  <section class="main">
+    <header class="header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="status-pill"><span class="status-dot"></span> Ollama local • 4 agents ready</div>
+        <span style="color:var(--text-muted);">Feature Implementation Swarm</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn">View history</button>
+        <button class="btn btn-primary">Run in background</button>
+      </div>
+    </header>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="composer">
+      <div class="composer-input-wrap">
+        <textarea id="input" rows="1" placeholder="Describe what you want to build… (drag files anywhere to upload)"></textarea>
+        <div style="display:flex;gap:8px;">
+          <button class="icon-btn" id="attachBtn" title="Attach">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button class="icon-btn" id="micBtn" title="Voice">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          <button class="icon-btn primary" id="sendBtn" title="Send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="workspace">
+    <div class="tabs">
+      <div class="tab active" data-tab="files">Workspace</div>
+      <div class="tab" data-tab="review">Review</div>
+    </div>
+    <div class="editor" id="filesPanel">
+      <div class="editor-header">
+        <span id="filePath">auth.py</span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn">Accept</button>
+          <button class="btn" style="color:var(--danger);">Reject</button>
+        </div>
+      </div>
+      <div class="editor-body"><pre id="codeView"></pre></div>
+    </div>
+    <div class="editor" id="reviewPanel" style="display:none;">
+      <div class="diff-review">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-secondary);">Proposed changes — auth.py</div>
+        <div style="font-family:var(--mono);font-size:11px;padding:2px 6px;border-radius:3px;background:rgba(239,68,68,0.10);color:#FCA5A5;">- SECRET = "super-secret-swarm-key"</div>
+        <div style="font-family:var(--mono);font-size:11px;padding:2px 6px;border-radius:3px;background:rgba(34,197,94,0.10);color:#86EFAC;margin-top:4px;">+ SECRET = os.environ.get("JWT_SECRET")</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="drop-overlay" id="dropOverlay">
+  <div class="drop-card">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    <div style="font-size:16px;font-weight:600;color:var(--text);margin-top:8px;">Drop files to upload</div>
+    <div style="font-size:12px;color:var(--text-muted);">Code, specs, images, or archives</div>
+  </div>
+</div>
+
+<script>
+const swarms = [
+  { id: 1, name: "SDLC Spec & Design", mode: "SEQUENTIAL", agents: "Spec Architect → Core Architect → Aura Critic" },
+  { id: 2, name: "Feature Implementation", mode: "PEER_TO_PEER", agents: "Core Architect ↔ Byte Code ↔ Bug Hunter", active: true },
+  { id: 3, name: "SecOps Build & Release", mode: "SEQUENTIAL", agents: "Byte Code → Shield Guard → Pipeline Deployer" },
+  { id: 6, name: "Autonomous Coding Harness", mode: "AGENTIC_LOOP", agents: "Core Architect plans, Byte Code acts, Bug Hunter verifies" }
+];
+const agents = [
+  { name: "Spec Architect", role: "Product", status: "idle" },
+  { name: "Core Architect", role: "Architect", status: "active" },
+  { name: "Byte Code", role: "Programmer", status: "active" },
+  { name: "Bug Hunter", role: "QA", status: "waiting" },
+  { name: "Shield Guard", role: "Security", status: "idle" },
+  { name: "Pipeline Deployer", role: "DevOps", status: "idle" }
+];
+const nodes = [
+  { name: "Local Node (Loopback)", status: "Online", latency: "12ms" },
+  { name: "Ollama Cloud Gateway", status: "Online", latency: "89ms" },
+  { name: "Edge Node B", status: "Offline", latency: "—" }
+];
+const sampleCode = `import jwt\nimport datetime\nimport os\n\nSECRET = os.environ.get("JWT_SECRET")\nif not SECRET:\n    raise ValueError("JWT_SECRET not set")\n\ndef generate_token(username):\n    payload = {\n        "sub": username,\n        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)\n    }\n    return jwt.encode(payload, SECRET, algorithm="HS256")\n\ndef verify_token(token):\n    try:\n        return jwt.decode(token, SECRET, algorithms=["HS256"])\n    except jwt.ExpiredSignatureError:\n        return "Token expired"\n    except jwt.InvalidTokenError:\n        return "Invalid token"`;
+const tree = [
+  { label: "workspace", depth: 0, type: "folder", open: true },
+  { label: "auth_spec.md", depth: 1, type: "file" },
+  { label: "app", depth: 1, type: "folder", open: true },
+  { label: "src", depth: 2, type: "folder", open: true },
+  { label: "main", depth: 3, type: "folder", open: false },
+  { label: "java", depth: 4, type: "folder", open: false },
+  { label: "com", depth: 5, type: "folder", open: false },
+  { label: "example", depth: 6, type: "folder", open: false },
+  { label: "MainActivity.kt", depth: 7, type: "file" },
+  { label: "auth.py", depth: 2, type: "file", active: true },
+  { label: "tests", depth: 1, type: "folder", open: true },
+  { label: "test_auth.py", depth: 2, type: "file" }
+];
+function renderSwarms() {
+  document.getElementById('swarmList').innerHTML = swarms.map(s => `
+    <div class="swarm-item ${s.active ? 'active' : ''}" data-id="${s.id}">
+      <div class="swarm-name">${s.name}</div>
+      <div class="swarm-meta">${s.mode} · ${s.agents}</div>
+    </div>`).join('');
+}
+function renderAgents() {
+  document.getElementById('agentList').innerHTML = agents.map(a => `
+    <div class="agent-row">
+      <span class="agent-dot ${a.status}"></span>
+      <span class="agent-name">${a.name}</span>
+      <span class="agent-role">${a.role}</span>
+    </div>`).join('');
+}
+function renderNodes() {
+  document.getElementById('nodeList').innerHTML = nodes.map(n => `
+    <div class="agent-row">
+      <span class="agent-dot ${n.status === 'Online' ? 'active' : 'idle'}"></span>
+      <span class="agent-name">${n.name}</span>
+      <span class="agent-role">${n.latency}</span>
+    </div>`).join('');
+}
+function renderTree() {
+  const filesPanel = document.getElementById('filesPanel');
+  const editor = filesPanel.querySelector('.editor-body');
+  const treeEl = document.createElement('div');
+  treeEl.className = 'tree';
+  treeEl.innerHTML = tree.map(n => {
+    const icon = n.type === 'folder' ? (n.open ? '▾' : '▸') : (n.label.endsWith('.kt') ? 'Kt' : n.label.endsWith('.py') ? 'Py' : '📄');
+    return `<div class="tree-node ${n.active ? 'active' : ''}" style="padding-left:${8 + n.depth * 14}px">
+      <span style="width:14px;color:var(--text-muted);">${icon}</span>
+      <span>${n.label}</span>
+    </div>`;
+  }).join('');
+  filesPanel.insertBefore(treeEl, editor);
+  document.getElementById('filePath').textContent = 'workspace/auth.py';
+  document.getElementById('codeView').textContent = sampleCode;
+}
+function addMessage(role, text, type = 'text') {
+  const chat = document.getElementById('chat');
+  const wrapper = document.createElement('div');
+  wrapper.className = `message ${role}`;
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  if (type === 'step') {
+    wrapper.innerHTML = `<div class="message-meta">${role === 'user' ? 'You' : 'Agent'} · ${now}</div>
+      <div class="step-card"><span class="step-badge badge-${text.variant}">${text.action}</span><span style="color:var(--text-secondary);font-size:12px;">${text.body}</span></div>`;
+  } else {
+    wrapper.innerHTML = `<div class="message-meta">${role === 'user' ? 'You' : 'Core Architect'} · ${now}</div><div class="bubble">${text}</div>`;
+  }
+  chat.appendChild(wrapper);
+  chat.scrollTop = chat.scrollHeight;
+}
+function simulateResponse() {
+  const steps = [
+    { action: 'PLAN', variant: 'plan', body: 'Plan: add env-var secret loading + validation' },
+    { action: 'OUTPUT', variant: 'output', body: 'Byte Code updated auth.py to read JWT_SECRET from environment and fail fast if missing.' },
+    { action: 'MCP_TOOL_CALL', variant: 'tool', body: 'Bug Hunter invoked pytest: 2 passed, 1 skipped' },
+    { action: 'FILE_CHANGE_APPLIED', variant: 'file', body: 'Updated workspace/auth.py (312 chars)' },
+    { action: 'CHECKPOINT_COMMIT', variant: 'commit', body: 'Checkpoint [a1b2c3d] after: secure JWT secret loading' }
+  ];
+  let i = 0;
+  function next() { if (i < steps.length) { addMessage('agent', steps[i], 'step'); i++; setTimeout(next, 900 + Math.random() * 700); } }
+  setTimeout(next, 600);
+}
+document.getElementById('sendBtn').addEventListener('click', () => {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text) return;
+  addMessage('user', text);
+  input.value = ''; input.rows = 1;
+  simulateResponse();
+});
+document.getElementById('input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('sendBtn').click(); } });
+document.getElementById('input').addEventListener('input', function() { this.rows = 1; this.rows = Math.min(8, Math.ceil(this.scrollHeight / 20)); });
+document.getElementById('micBtn').addEventListener('click', function() { this.classList.toggle('primary'); this.style.color = this.classList.contains('primary') ? '#fff' : ''; });
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('filesPanel').style.display = t.dataset.tab === 'files' ? 'flex' : 'none';
+  document.getElementById('reviewPanel').style.display = t.dataset.tab === 'review' ? 'flex' : 'none';
+}));
+const dropOverlay = document.getElementById('dropOverlay');
+['dragenter','dragover','dragleave','drop'].forEach(evt => window.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); }));
+window.addEventListener('dragenter', () => dropOverlay.classList.add('active'));
+window.addEventListener('dragleave', e => { if (e.relatedTarget === null) dropOverlay.classList.remove('active'); });
+window.addEventListener('drop', e => { dropOverlay.classList.remove('active'); console.log('Files:', e.dataTransfer.files); });
+document.getElementById('attachBtn').addEventListener('click', () => { const input = document.createElement('input'); input.type = 'file'; input.multiple = true; input.click(); });
+renderSwarms(); renderAgents(); renderNodes(); renderTree();
+addMessage('agent', 'Decentralized Swarm SDLC channel initialized. Active swarm configurations are ready to accept tasks.');
+</script>
+</body>
+</html>

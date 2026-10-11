@@ -1,6 +1,6 @@
 # PRD — Agentic Coding Harness
 
-Status: shipped (PR #1, `7e72f8c`) · this document guides the next phase (see `agent-os/backlog.md`)
+Status: shipped (PR #1, `7e72f8c`) · Tier 1–5 done · Tier 6 items 6.1/6.4/6.5/6.6 shipped (production-readiness plan, 2026-08-05) — see `agent-os/backlog.md`
 
 ## Overview
 
@@ -95,11 +95,11 @@ trust the result without watching every step.
 | FR9 | Verified steps auto-checkpoint via git commit, traceable to the originating task | Shipped |
 | FR10 | User can revert the workspace to an earlier checkpoint | Shipped |
 | FR11 | Loop prefers the Ollama Cloud Gateway node for its own reasoning when online | Shipped |
-| FR12 | The gated action's risk reasoning (why it was flagged) is visible to the user, not just the fact that it was | Backlog (Tier 1) |
-| FR13 | Runaway cloud-model spend is bounded or made visible before it happens | Backlog (Tier 1) |
-| FR14 | New `TaskStep` action types render with distinct icon/color, not plain text | Backlog (Tier 1) |
-| FR15 | An agent blocked on approval is visually distinguishable in the agent roster, not just via the dialog | Backlog (Tier 2) |
-| FR16 | A task touching multiple files gets one batched review, not N sequential dialogs | Backlog (Tier 2) |
+| FR12 | The gated action's risk reasoning (why it was flagged) is visible to the user, not just the fact that it was | Shipped |
+| FR13 | Runaway cloud-model spend is bounded or made visible before it happens | Shipped |
+| FR14 | New `TaskStep` action types render with distinct icon/color, not plain text | Shipped |
+| FR15 | An agent blocked on approval is visually distinguishable in the agent roster, not just via the dialog | Shipped |
+| FR16 | A task touching multiple files gets one batched review, not N sequential dialogs | Shipped |
 
 ## Success metrics
 
@@ -120,10 +120,14 @@ and manual review rather than production metrics:
 
 ## Key risks
 
-- **Cost risk (open).** Cloud-preferred routing has no spend visibility or
-  cap yet — see FR13, Tier 1 backlog.
-- **Trust risk (open).** Risk-gating reasoning is invisible to the user —
-  see FR12, Tier 1 backlog.
+- **Cost risk (mitigated).** Cloud-preferred routing now has a user-configurable
+  token cap (`TaskBudgetTracker`) and the heuristic is documented in
+  `BudgetScreen` copy — see FR13. Spend beyond the cap is still possible
+  mid-call (boundary enforcement) and the heuristic is approximate.
+- **Trust risk (mitigated).** Risk-gating reasoning is now visible in the
+  approval dialog plus a "Awaiting Approval" roster badge, and risky
+  directives auto-decline headless in the background service — see
+  FR12/FR15.
 - **Reliability of "verification."** The verify phase's failure detection
   is a text-keyword heuristic over whatever an MCP tool reports, not a
   structured pass/fail — no MCP tool in this app declares one today.

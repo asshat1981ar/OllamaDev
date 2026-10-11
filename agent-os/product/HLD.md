@@ -153,8 +153,9 @@ sequenceDiagram
   Room-free fakes) — see `agent-os/standards/testing/`. `PendingApprovalStore`
   is a process-wide singleton in tests too; every new test resets it in
   `@Before`/`@After`.
-- **Cost.** `preferCloud` routing has no spend cap — flagged as an open
-  risk in the PRD, Tier 1 backlog.
+- **Cost.** `preferCloud` routing is bounded by a user-configurable token cap
+  (`TaskBudgetTracker`, `cloud_token_cap`) enforced at iteration boundaries; the
+  estimate heuristic is documented in `BudgetScreen` copy and PRD FR13.
 - **Reliability under this device's Robolectric constraints.** No new
   dependency on SQLite-native or Keystore-native code paths beyond what
   already existed (`SecurePrefsInterface` fix reduced reliance on real

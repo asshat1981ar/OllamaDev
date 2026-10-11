@@ -110,9 +110,18 @@ class AgenticLoopService : Service() {
 
             val task = db.swarmTaskDao().getTaskById(activeTaskId)
             val succeeded = task?.status == "Completed"
-            val summary = task?.result?.take(120) ?: "Task finished."
+            val summary = buildTaskSummary(db, activeTaskId, task?.result?.take(120) ?: "Task finished.")
             finalizeAgenticLoopNotification(applicationContext, succeeded, summary)
             stopForegroundAndSelf()
+        }
+    }
+
+    private suspend fun buildTaskSummary(db: AppDatabase, taskId: Int, baseSummary: String): String {
+        val skippedCount = db.taskStepDao().getStepsForTaskSync(taskId).count { it.actionType == "APPROVAL_SKIPPED_HEADLESS" }
+        return if (skippedCount > 0) {
+            "$baseSummary ($skippedCount approval(s) skipped in background)"
+        } else {
+            baseSummary
         }
     }
 
@@ -126,7 +135,8 @@ class AgenticLoopService : Service() {
             appContext = applicationContext,
             securePrefs = RealSecurePrefs(applicationContext),
             ollamaService = OllamaServiceDefault,
-            dispatcher = Dispatchers.IO
+            dispatcher = Dispatchers.IO,
+            isHeadless = true
         )
     }
 
