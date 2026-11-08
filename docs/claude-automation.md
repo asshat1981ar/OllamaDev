@@ -21,7 +21,7 @@ Claude Code Action is wired into this repo with five workflows. All are pinned b
 - `--permission-mode auto` has a safety reviewer that may approve an unlisted command in `claude.yml`. The fork refusal and the env scrub reduce the impact; they do not remove it.
 - Same-repo branches can carry hostile files (for example `CLAUDE.md` imports). Only people with write access can create them.
 - Screenshot PNGs are attacker-influenced input to a model, from same-repo branches only.
-- The download-artifact pin (`d3f86a10...`) was copied from another repo's workflow and carries a `# v4` comment; confirm the tag before relying on it.
+- Every action is pinned to a verified commit SHA; `actions/download-artifact` is v8.0.2 (`9000827c...`, checked against the upstream tag with `git ls-remote`).
 - Firewall hosts for Gradle and Maven are unverified until the first run on that runner.
 
 ## Turn it on
