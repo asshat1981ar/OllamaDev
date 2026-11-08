@@ -1,0 +1,75 @@
+name: claude-mcp-contract
+
+# Weekly parity check between the tools this app calls and the tools the companion
+# ollamadev-mcp-server registers. Claude returns a typed verdict (structured_output) and
+# keeps a single issue titled "MCP contract drift" up to date. Advisory only.
+on:
+  schedule:
+    - cron: "41 10 * * 3"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  contract:
+    if: vars.CLAUDE_PAUSE != 'true'
+    runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    concurrency:
+      group: claude-mcp-contract
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout app
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout MCP server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: asshat1981ar/ollamadev-mcp-server
+          path: mcp-server
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Compare contracts
+        id: contract
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          include_comments_by_actor: "asshat1981ar,coderabbitai[bot]"
+          exclude_comments_by_actor: "dependabot[bot],renovate[bot]"
+          prompt: "/mcp-contract"
+          claude_args: |
+            --permission-mode auto
+            --model ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5-5' }}
+            --max-turns 20
+            --add-dir mcp-server
+            --allowedTools "Read,Glob,Grep,Bash(gh issue list:*),Bash(gh issue create:*),Bash(gh issue comment:*)"
+            --disallowedTools "Edit,MultiEdit,Write,WebFetch,WebSearch"
+            --json-schema '{"type":"object","required":["app_tools","server_tools","drift"],"properties":{"app_tools":{"type":"array","items":{"type":"string"}},"server_tools":{"type":"array","items":{"type":"string"}},"drift":{"type":"array","items":{"type":"object","required":["tool","kind"],"properties":{"tool":{"type":"string"},"kind":{"enum":["missing_on_server","unused_by_app","arg_mismatch","approval_gap"]},"detail":{"type":"string"}}}}}}'
+
+      - name: Summarise verdict
+        if: ${{ !cancelled() }}
+        env:
+          VERDICT_JSON: ${{ steps.contract.outputs.structured_output }}
+        run: |
+          if ! jq -e '.drift' <<<"$VERDICT_JSON" >/dev/null 2>&1; then
+            echo "## MCP contract drift: WARN, no verdict (Claude step produced no structured output; not a pass)" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::MCP contract check produced no verdict"
+            exit 0
+          fi
+          {
+            echo "## MCP contract drift"
+            echo
+            echo "App tools: $(jq -r '.app_tools | length' <<<"$VERDICT_JSON"), server tools: $(jq -r '.server_tools | length' <<<"$VERDICT_JSON")"
+            echo
+            echo "| tool | kind | detail |"
+            echo "|---|---|---|"
+            jq -r '.drift[] | "| \(.tool) | \(.kind) | \(.detail // "") |"' <<<"$VERDICT_JSON"
+          } >> "$GITHUB_STEP_SUMMARY"

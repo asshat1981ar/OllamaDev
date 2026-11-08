@@ -169,3 +169,10 @@ app/src/main/java/com/example/
 6. New screens are flat files under `ui/`, wired into the `when (activeTab)` switch in
    `MainActivity.kt` — not `NavHost`.
 7. Default to dark theme only; don't build light-mode-specific variants unless asked.
+
+<!-- BEGIN claude-code-action (generated) -->
+## Claude in GitHub Actions
+- CI runners are x86_64: no QEMU/aapt2 wrapper needed; use the `run-ollamadev` skill commands directly.
+- New unit-test packages must be added to a shard filter in `.github/workflows/android-ci.yml`, or they never run in the merge gate.
+- Room is `exportSchema = false` with destructive fallback: any entity change needs an explicit `MIGRATION_n_m`.
+<!-- END claude-code-action -->

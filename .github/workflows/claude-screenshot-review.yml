@@ -1,0 +1,88 @@
+name: claude-screenshot-review
+
+# Label-gated design-rule review. Records Roborazzi screenshots for the PR base and head
+# (no baselines are committed), then Claude compares them against the CLAUDE.md rules.
+# Add the label "claude:screens" to a same-repo, non-draft PR to run it.
+# The workspace root is the trusted BASE checkout (so .claude/ and CLAUDE.md are the base
+# versions); head code runs only inside head/ with a read-only token.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+    paths:
+      - "app/src/main/java/com/example/ui/**"
+      - "app/src/main/res/**"
+
+permissions: {}
+
+jobs:
+  screenshots:
+    if: |
+      vars.CLAUDE_PAUSE != 'true' &&
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'claude:screens')
+    runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    concurrency:
+      group: claude-screenshot-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout base (workspace root)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Checkout head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          persist-credentials: false
+
+      - name: Record base screenshots
+        run: ./gradlew :app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest --no-daemon
+
+      - name: Record head screenshots
+        working-directory: head
+        run: ./gradlew :app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest --no-daemon
+
+      - name: Collect screenshots
+        run: |
+          mkdir -p shots/base shots/head
+          cp app/build/outputs/roborazzi-screens/*.png shots/base/
+          cp head/app/build/outputs/roborazzi-screens/*.png shots/head/
+
+      - name: Upload base screenshots
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screens-base
+          path: shots/base/
+          retention-days: 7
+
+      - name: Upload head screenshots
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screens-head
+          path: shots/head/
+          retention-days: 7
+
+      - name: Design review
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          include_comments_by_actor: "asshat1981ar,coderabbitai[bot]"
+          exclude_comments_by_actor: "dependabot[bot],renovate[bot]"
+          prompt: "/screenshot-review PR_NUMBER: ${{ github.event.pull_request.number }}"
+          claude_args: |
+            --permission-mode auto
+            --model ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5-5' }}
+            --max-turns 20
+            --add-dir shots
+            --allowedTools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*)"
+            --disallowedTools "Edit,MultiEdit,Write,Bash(./gradlew:*),WebFetch,WebSearch"
