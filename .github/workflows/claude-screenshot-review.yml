@@ -1,10 +1,15 @@
 name: claude-screenshot-review
 
-# Label-gated design-rule review. Records Roborazzi screenshots for the PR base and head
-# (no baselines are committed), then Claude compares them against the CLAUDE.md rules.
-# Add the label "claude:screens" to a same-repo, non-draft PR to run it.
-# The workspace root is the trusted BASE checkout (so .claude/ and CLAUDE.md are the base
-# versions); head code runs only inside head/ with a read-only token.
+# Label-gated design-rule review, in two jobs so PR code never shares a job with a secret.
+#   screenshots: checks out BASE (root) and HEAD (head/), runs Gradle on both, uploads the
+#     PNGs. contents: read only, no secrets, no id-token, no write token. Head build scripts
+#     DO run here, so this job must stay credential-free.
+#   design-review: checks out BASE only (so .claude/ and CLAUDE.md are the trusted base
+#     versions), downloads the PNGs into shots/, and lets Claude Read them. No Gradle, no
+#     head code, no persisted git credentials. pull-requests: write only to post the comment.
+# The PNGs are still attacker-influenced input (same-repo branches only); the job keeps only
+# regular *.png files under a size cap and Claude treats them as data.
+# Add the label "claude:screens" to a same-repo, non-draft PR to run it. Advisory only.
 on:
   pull_request:
     types: [labeled, synchronize]
@@ -25,11 +30,10 @@ jobs:
     runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     concurrency:
-      group: claude-screenshot-review-${{ github.event.pull_request.number }}
+      group: claude-screenshots-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - name: Checkout base (workspace root)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,13 +75,53 @@ jobs:
           path: shots/head/
           retention-days: 7
 
+  design-review:
+    needs: screenshots
+    if: ${{ !cancelled() && needs.screenshots.result == 'success' && vars.CLAUDE_PAUSE != 'true' && github.actor != 'dependabot[bot]' }}
+    runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    concurrency:
+      group: claude-design-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+    permissions:
+      contents: read
+      pull-requests: write   # post the review comment; github_token path, so no id-token
+    steps:
+      - name: Checkout base only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download base screenshots
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: screens-base
+          path: shots/base
+
+      - name: Download head screenshots
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: screens-head
+          path: shots/head
+
+      - name: Keep only regular PNGs under a size cap
+        run: |
+          # Artifacts come from a job that ran PR code: drop anything that is not a plain
+          # PNG, and cap size so a hostile image cannot flood Claude's context.
+          find shots -type l -delete
+          find shots -type f ! -name '*.png' -delete
+          find shots -type f -name '*.png' -size +4M -delete
+          echo "base: $(find shots/base -type f | wc -l) png, head: $(find shots/head -type f | wc -l) png" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Design review
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          include_comments_by_actor: "asshat1981ar,coderabbitai[bot]"
-          exclude_comments_by_actor: "dependabot[bot],renovate[bot]"
           prompt: "/screenshot-review PR_NUMBER: ${{ github.event.pull_request.number }}"
           claude_args: |
             --permission-mode auto

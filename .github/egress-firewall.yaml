@@ -12,6 +12,8 @@ allow:
   - claude.ai
   # Claude Code binary
   - downloads.claude.ai
+  # Bun runtime install used by the action
+  - bun.sh
   # Release asset downloads (Bun/Node setup by the action)
   - release-assets.githubusercontent.com
   # npm packages installed by the action

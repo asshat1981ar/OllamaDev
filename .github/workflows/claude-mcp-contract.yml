@@ -18,6 +18,8 @@ jobs:
     concurrency:
       group: claude-mcp-contract
       cancel-in-progress: true
+    env:
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
     permissions:
       contents: read
       issues: write
@@ -42,8 +44,6 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          include_comments_by_actor: "asshat1981ar,coderabbitai[bot]"
-          exclude_comments_by_actor: "dependabot[bot],renovate[bot]"
           prompt: "/mcp-contract"
           claude_args: |
             --permission-mode auto

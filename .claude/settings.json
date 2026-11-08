@@ -1,21 +1,9 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(./gradlew :app:testDebugUnitTest:*)",
-      "Bash(./gradlew testDebugUnitTest:*)",
-      "Bash(./gradlew :app:assembleDebug:*)",
-      "Bash(./gradlew assembleDebug:*)",
-      "Bash(./gradlew :app:lintDebug:*)",
-      "Bash(./gradlew :app:recordRoborazziDebug:*)",
-      "Bash(./gradlew recordRoborazziDebug:*)",
-      "Bash(python3 scripts/verify_modern_mcp.py:*)",
-      "Bash(git status)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)"
-    ],
+    "allow": [],
     "deny": [
-      "Read(./.env)",
-      "Read(./.env.local)",
+      "Read(./.env*)",
+      "Read(./.git/**)",
       "Read(**/*.pem)",
       "Read(**/*.key)",
       "Read(**/*.jks)",
