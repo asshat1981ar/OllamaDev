@@ -7,7 +7,9 @@ name: claude
 #
 # Trust model: tag mode checks out the PR head and holds the OAuth token and an App token.
 # So this job (1) refuses cross-repo (fork) PRs, (2) allowlists NO build, test, package
-# manager or repo-script command, only read-only git/gh and the action's file tools, and
+# manager or repo-script command, only read-only git/gh (gh pr diff; gh pr view and gh issue view
+# are denied because they return unfiltered comments, bypassing the include/exclude_comments_by_actor
+# filters that only cover the action's own pre-fetched context) and the action's file tools, and
 # (3) scrubs secrets from Claude subprocess env. Claude cannot run Gradle here; CI runs the
 # tests on its pushes and holds no secrets. Residual risk: --permission-mode auto may let
 # its safety reviewer approve an unlisted command, and a same-repo branch can carry hostile
@@ -90,6 +92,6 @@ jobs:
             --permission-mode auto
             --model ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
             --max-turns 50
-            --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
-            --disallowedTools "WebFetch,WebSearch,Bash(./gradlew:*),Bash(gradle:*),Bash(python3:*),Bash(bash:*),Bash(sh:*),Bash(gh workflow run:*),Bash(gh api:*),Bash(curl:*)"
+            --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr diff:*)"
+            --disallowedTools "WebFetch,WebSearch,Bash(./gradlew:*),Bash(gradle:*),Bash(python3:*),Bash(bash:*),Bash(sh:*),Bash(gh workflow run:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(python:*),Bash(make:*),Bash(curl:*)"
             --append-system-prompt "CI context. You cannot run builds, tests or repo scripts in this job; CI runs Gradle on your pushes without secrets, so say what to check there instead of claiming tests passed. Follow CLAUDE.md design rules for any UI change and describe the screens you changed."

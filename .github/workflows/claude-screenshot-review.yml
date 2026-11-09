@@ -6,10 +6,14 @@ name: claude-screenshot-review
 #     DO run here, so this job must stay credential-free.
 #   design-review: checks out BASE only (so .claude/ and CLAUDE.md are the trusted base
 #     versions), downloads the PNGs into shots/, and lets Claude Read them. No Gradle, no
-#     head code, no persisted git credentials. pull-requests: write only to post the comment.
+#     head code, no persisted git credentials, read-only token. Claude returns a typed report.
+#   post-review: deterministic job (no Claude, no secrets, pull-requests: write) that posts the
+#     report as one comment, with @ neutralised.
 # The PNGs are still attacker-influenced input (same-repo branches only); the job keeps only
 # regular *.png files under a size cap and Claude treats them as data.
 # Add the label "claude:screens" to a same-repo, non-draft PR to run it. Advisory only.
+# The paths: filter also applies to the labeled event: labelling a PR whose latest push touched no UI
+# path does nothing; push a UI change, or re-label after one.
 on:
   pull_request:
     types: [labeled, synchronize]
@@ -47,6 +51,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: head
           persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 17
 
       - name: Record base screenshots
         run: ./gradlew :app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest --no-daemon
@@ -87,7 +97,8 @@ jobs:
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
     permissions:
       contents: read
-      pull-requests: write   # post the review comment; github_token path, so no id-token
+    outputs:
+      report: ${{ steps.review.outputs.structured_output }}
     steps:
       - name: Checkout base only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,6 +129,8 @@ jobs:
           echo "base: $(find shots/base -type f | wc -l) png, head: $(find shots/head -type f | wc -l) png" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Design review
+        id: review
+        continue-on-error: true
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -128,5 +141,43 @@ jobs:
             --model ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5-5' }}
             --max-turns 20
             --add-dir shots
-            --allowedTools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*)"
-            --disallowedTools "Edit,MultiEdit,Write,Bash(./gradlew:*),WebFetch,WebSearch"
+            --allowedTools "Read,Glob,Grep,Bash(gh pr diff:*)"
+            --disallowedTools "Edit,MultiEdit,Write,Bash(./gradlew:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr comment:*),WebFetch,WebSearch"
+            --json-schema '{"type":"object","required":["screens_compared","findings"],"properties":{"screens_compared":{"type":"array","items":{"type":"string"}},"screens_missing":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"object","required":["rule","message"],"properties":{"rule":{"type":"string"},"file":{"type":"string"},"line":{"type":"integer"},"message":{"type":"string"}}}}}}'
+
+  post-review:
+    needs: design-review
+    if: ${{ !cancelled() && needs.design-review.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: claude-design-post-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post design review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          OUT: ${{ needs.design-review.outputs.report }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OUT:-}" ]; then
+            echo "::warning::Claude returned no design report (rate limit or error); nothing posted. No report is not a pass."
+            exit 0
+          fi
+          {
+            echo "### Claude design-rule review (advisory)"
+            echo
+            echo "Compared: $(printf '%s' "$OUT" | jq -r '[.screens_compared[]?] | length') screens. Missing on a side: $(printf '%s' "$OUT" | jq -r '[.screens_missing[]?] | length')."
+            printf '%s' "$OUT" | jq -r '.screens_missing[]? | "- missing: `\(.[0:120] | gsub("[`\n]";" "))`"'
+            echo
+            if [ "$(printf '%s' "$OUT" | jq '.findings | length')" = "0" ]; then
+              echo "No rule violations found in the compared screens."
+            else
+              printf '%s' "$OUT" | jq -r '.findings[:30][] | "- **\(.rule[0:80] | gsub("[\n]";" "))** `\((.file // "")[0:160] | gsub("[`\n]";" ")):\(.line // 0)`: \(.message[0:600] | gsub("\n";" ") | gsub("@";"@\u200b"))"'
+            fi
+          } > "$RUNNER_TEMP/design.md"
+          gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/design.md" --edit-last --create-if-none

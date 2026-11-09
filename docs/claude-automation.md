@@ -6,13 +6,14 @@ Claude Code Action is wired into this repo with five workflows. All are pinned b
 |---|---|---|
 | `claude.yml` | `@claude` in an issue, PR comment or review (owner only) | Edits files and pushes a `claude/` branch. It cannot run Gradle or any repo script; CI runs the tests on its pushes |
 | `claude-review.yml` | PR to `main` touching app/build files (non-draft, same repo) | Read-only multi-lens review of the diff. It does not read PR comments |
-| `claude-screenshot-review.yml` | PR labeled `claude:screens` | Job `screenshots` runs Gradle on base and head with no secrets and uploads PNGs; job `design-review` checks out base only, downloads the PNGs and has Claude check them against the CLAUDE.md design rules |
-| `claude-mcp-contract.yml` | Weekly (Wed) or manual | Compares tools the app calls with `ollamadev-mcp-server`; keeps one issue "MCP contract drift". No verdict is a WARN, never a pass |
+| `claude-screenshot-review.yml` | PR labeled `claude:screens` | Job `screenshots` runs Gradle on base and head with no secrets and uploads PNGs; job `design-review` checks out base only, downloads the PNGs and has Claude check them against the CLAUDE.md design rules and return a typed report; job `post-review` (no Claude) posts it as one comment. The `paths:` filter also applies to the `labeled` event, so label before or after a UI push |
+| `claude-mcp-contract.yml` | Weekly (Wed) or manual | Compares tools the app calls with `ollamadev-mcp-server`; Claude has no `gh` tools; a deterministic job keeps one issue "MCP contract drift". No verdict, or a side with zero tools, is a WARN, never a pass |
 | `agent-approval-check.yml` | PRs and comments | Requires your approval on PRs containing Claude commits |
 
 ## What each job can and cannot do
 
-- `claude.yml` holds the OAuth token and a write-scoped App token, and tag mode checks out the PR head. So it refuses cross-repo (fork) PRs through the `Refuse cross-repo PRs` step (fail closed), allowlists only read-only `git` and `gh` commands, and sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. No PR code is executed by an allowlisted tool.
+- `claude.yml` holds the OAuth token and a write-scoped App token, and tag mode checks out the PR head. So it refuses cross-repo (fork) PRs through the `Refuse cross-repo PRs` step (fail closed), allowlists only read-only `git` commands and `gh pr diff` (`gh pr view`, `gh issue view`, `gh api` and `gh search` are denied everywhere: they return unfiltered comments that bypass the actor filters, which only cover tag mode's own pre-fetch), and sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. No PR code is executed by an allowlisted tool.
+- No Claude job holds `gh pr comment` or issue tools: `--body-file` could publish `.git/config`. Comments and issues come from deterministic jobs. `claude-review.yml` posts inline comments only and is advisory (its `paths:` filter means it must never be required).
 - `.claude/settings.json` holds deny rules only. Each workflow grants its own tools through `--allowedTools`.
 - `claude-screenshot-review.yml` does run PR head code (Gradle) in the `screenshots` job. That job has `contents: read` only, no secrets and no `id-token`, and only for same-repo PRs. The Claude job never sees head code, only PNGs that survived a plain-file, size-capped filter.
 

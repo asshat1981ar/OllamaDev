@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*)
+allowed-tools: Read,Glob,Grep,Bash(gh pr diff:*)
 description: Compare base and head Roborazzi screenshots against the CLAUDE.md design rules
 ---
 
@@ -14,5 +14,5 @@ Base screenshots are in `shots/base/*.png`, head screenshots in `shots/head/*.pn
    - icons use the `Icons.Rounded` style (no filled/outlined/sharp glyphs)
    - spacing on the 4/6/8/10/12/14/16/24 dp scale
    - tablet layout branch at `screenWidthDp >= 600` still works
-3. Report only visible regressions or rule violations. For each, cite the composable's `file:line` from the diff and post it as an inline comment when the line is in the diff.
-4. Post one summary comment with `gh pr comment` listing screens compared and findings. If a screenshot is missing on either side, say so; never report a pass for a screen you could not compare.
+3. Report only visible regressions or rule violations. For each, cite the composable's `file` and `line` from the diff.
+4. You cannot post comments; the workflow posts your result. Return only the JSON required by the supplied schema: `screens_compared` (filenames you compared), `screens_missing` (filenames missing on either side) and `findings` (rule, file, line, message). Never report a pass for a screen you could not compare: list it in `screens_missing`.

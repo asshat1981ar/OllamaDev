@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(gh pr comment:*),Bash(gh pr diff:*)
+allowed-tools: Bash(gh pr diff:*)
 description: Review a pull request
 ---
 
@@ -21,4 +21,4 @@ Also run these domain reviewers when the diff touches their area:
 
 Instruct each to only provide noteworthy feedback. Once they finish, review the feedback and post only the feedback that you also deem noteworthy.
 
-Use inline comments for specific issues and one concise top-level summary comment.
+Use inline comments for specific issues. You have no top-level comment tool: put a concise overall summary in your final message (it is shown in the job summary).

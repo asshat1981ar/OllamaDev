@@ -1,8 +1,9 @@
 name: claude-mcp-contract
 
 # Weekly parity check between the tools this app calls and the tools the companion
-# ollamadev-mcp-server registers. Claude returns a typed verdict (structured_output) and
-# keeps a single issue titled "MCP contract drift" up to date. Advisory only.
+# ollamadev-mcp-server registers. Claude is read-only with no gh tools and returns a typed verdict
+# (structured_output); a separate deterministic job (no Claude, no secrets) keeps a single issue titled
+# "MCP contract drift" up to date. Claude never reads public issue text. Advisory only.
 on:
   schedule:
     - cron: "41 10 * * 3"
@@ -22,7 +23,8 @@ jobs:
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
     permissions:
       contents: read
-      issues: write
+    outputs:
+      verdict: ${{ steps.contract.outputs.structured_output }}
     steps:
       - name: Checkout app
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,6 +42,7 @@ jobs:
 
       - name: Compare contracts
         id: contract
+        continue-on-error: true
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -50,26 +53,60 @@ jobs:
             --model ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5-5' }}
             --max-turns 20
             --add-dir mcp-server
-            --allowedTools "Read,Glob,Grep,Bash(gh issue list:*),Bash(gh issue create:*),Bash(gh issue comment:*)"
-            --disallowedTools "Edit,MultiEdit,Write,WebFetch,WebSearch"
+            --allowedTools "Read,Glob,Grep"
+            --disallowedTools "Edit,MultiEdit,Write,WebFetch,WebSearch,Bash"
             --json-schema '{"type":"object","required":["app_tools","server_tools","drift"],"properties":{"app_tools":{"type":"array","items":{"type":"string"}},"server_tools":{"type":"array","items":{"type":"string"}},"drift":{"type":"array","items":{"type":"object","required":["tool","kind"],"properties":{"tool":{"type":"string"},"kind":{"enum":["missing_on_server","unused_by_app","arg_mismatch","approval_gap"]},"detail":{"type":"string"}}}}}}'
 
-      - name: Summarise verdict
-        if: ${{ !cancelled() }}
+  report:
+    needs: contract
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: claude-mcp-contract-report
+      cancel-in-progress: false
+    permissions:
+      issues: write
+    steps:
+      - name: Summarise verdict and upsert the drift issue
         env:
-          VERDICT_JSON: ${{ steps.contract.outputs.structured_output }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERDICT_JSON: ${{ needs.contract.outputs.verdict }}
         run: |
+          set -euo pipefail
+          title="MCP contract drift"
           if ! jq -e '.drift' <<<"$VERDICT_JSON" >/dev/null 2>&1; then
             echo "## MCP contract drift: WARN, no verdict (Claude step produced no structured output; not a pass)" >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::MCP contract check produced no verdict"
             exit 0
           fi
+          n_app=$(jq -r '.app_tools | length' <<<"$VERDICT_JSON")
+          n_srv=$(jq -r '.server_tools | length' <<<"$VERDICT_JSON")
+          n_drift=$(jq -r '.drift | length' <<<"$VERDICT_JSON")
           {
             echo "## MCP contract drift"
             echo
-            echo "App tools: $(jq -r '.app_tools | length' <<<"$VERDICT_JSON"), server tools: $(jq -r '.server_tools | length' <<<"$VERDICT_JSON")"
+            echo "App tools: $n_app, server tools: $n_srv"
             echo
             echo "| tool | kind | detail |"
             echo "|---|---|---|"
-            jq -r '.drift[] | "| \(.tool) | \(.kind) | \(.detail // "") |"' <<<"$VERDICT_JSON"
-          } >> "$GITHUB_STEP_SUMMARY"
+            jq -r '.drift[:100][] | "| \(.tool[0:120] | gsub("[|\n]";" ")) | \(.kind) | \((.detail // "")[0:400] | gsub("[|\n]";" ") | gsub("@";"@\u200b")) |"' <<<"$VERDICT_JSON"
+          } > "$RUNNER_TEMP/body.md"
+          cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$n_app" = "0" ] || [ "$n_srv" = "0" ]; then
+            echo "::warning::One side listed no tools (app=$n_app, server=$n_srv): an empty drift list is NOT a clean result."
+            echo "**WARN:** one side listed no tools; an empty drift list is not a clean result." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Run: $RUN_URL" >> "$RUNNER_TEMP/body.md"
+          existing=$(gh issue list --repo "$REPO" --state open --author app/github-actions --search "\"$title\" in:title" --json number,title \
+            | jq -r --arg t "$title" '[.[] | select(.title == $t)][0].number // empty')
+          if [ "$n_drift" = "0" ]; then
+            exit 0
+          fi
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi
