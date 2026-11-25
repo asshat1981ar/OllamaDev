@@ -4,7 +4,7 @@ Claude Code Action is wired into this repo with five workflows. All are pinned b
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `claude.yml` | `@claude` in an issue, PR comment or review (owner only) | Edits files and pushes a `claude/` branch. It cannot run Gradle or any repo script; CI runs the tests on its pushes |
+| `claude.yml` | `@claude` in an issue, PR comment or review (owner only) | Edits files and pushes a `claude/` branch. It cannot run Gradle or any repo script; CI tests the branch only once a PR targets `main` or CI is dispatched |
 | `claude-review.yml` | PR to `main` touching app/build files (non-draft, same repo) | Read-only multi-lens review of the diff. It does not read PR comments |
 | `claude-screenshot-review.yml` | PR labeled `claude:screens` | Job `screenshots` runs Gradle on base and head with no secrets and uploads PNGs; job `design-review` checks out base only, downloads the PNGs and has Claude check them against the CLAUDE.md design rules and return a typed report; job `post-review` (no Claude) posts it as one comment. The `paths:` filter also applies to the `labeled` event, so label before or after a UI push |
 | `claude-mcp-contract.yml` | Weekly (Wed) or manual | Compares tools the app calls with `ollamadev-mcp-server`; Claude has no `gh` tools; a deterministic job keeps one issue "MCP contract drift". No verdict, or a side with zero tools, is a WARN, never a pass |

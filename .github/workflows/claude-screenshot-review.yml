@@ -23,6 +23,11 @@ on:
 
 permissions: {}
 
+# One PR-scoped group for all three jobs, so a newer push cancels the whole older run.
+concurrency:
+  group: claude-screenshot-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   screenshots:
     if: |
@@ -33,9 +38,6 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'claude:screens')
     runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
-    concurrency:
-      group: claude-screenshots-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -90,9 +92,6 @@ jobs:
     if: ${{ !cancelled() && needs.screenshots.result == 'success' && vars.CLAUDE_PAUSE != 'true' && github.actor != 'dependabot[bot]' }}
     runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
-    concurrency:
-      group: claude-design-review-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     env:
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
     permissions:
@@ -143,16 +142,13 @@ jobs:
             --add-dir shots
             --allowedTools "Read,Glob,Grep,Bash(gh pr diff:*)"
             --disallowedTools "Edit,MultiEdit,Write,Bash(./gradlew:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr comment:*),WebFetch,WebSearch"
-            --json-schema '{"type":"object","required":["screens_compared","findings"],"properties":{"screens_compared":{"type":"array","items":{"type":"string"}},"screens_missing":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"object","required":["rule","message"],"properties":{"rule":{"type":"string"},"file":{"type":"string"},"line":{"type":"integer"},"message":{"type":"string"}}}}}}'
+            --json-schema '{"type":"object","required":["screens_compared","screens_missing","findings"],"properties":{"screens_compared":{"type":"array","items":{"type":"string"}},"screens_missing":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"object","required":["rule","file","line","message"],"properties":{"rule":{"type":"string"},"file":{"type":"string"},"line":{"type":"integer"},"message":{"type":"string"}}}}}}'
 
   post-review:
     needs: design-review
     if: ${{ !cancelled() && needs.design-review.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    concurrency:
-      group: claude-design-post-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     permissions:
       pull-requests: write
     steps:
@@ -162,8 +158,14 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           OUT: ${{ needs.design-review.outputs.report }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
+          if [ "$current" != "$HEAD_SHA" ]; then
+            echo "::notice::PR head moved from $HEAD_SHA to $current; not posting a stale report."
+            exit 0
+          fi
           if [ -z "${OUT:-}" ]; then
             echo "::warning::Claude returned no design report (rate limit or error); nothing posted. No report is not a pass."
             exit 0
@@ -179,5 +181,13 @@ jobs:
             else
               printf '%s' "$OUT" | jq -r '.findings[:30][] | "- **\(.rule[0:80] | gsub("[\n]";" "))** `\((.file // "")[0:160] | gsub("[`\n]";" ")):\(.line // 0)`: \(.message[0:600] | gsub("\n";" ") | gsub("@";"@\u200b"))"'
             fi
+            echo
+            echo "<!-- claude-design-review -->"
           } > "$RUNNER_TEMP/design.md"
-          gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/design.md" --edit-last --create-if-none
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- claude-design-review -->")))] | last | .id // empty')
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@"$RUNNER_TEMP/design.md" >/dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/design.md"
+          fi

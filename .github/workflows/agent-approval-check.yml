@@ -2,7 +2,8 @@ name: agent-approval-check
 
 # Requires one human approval (Aaron) on PRs that contain agent-authored commits.
 # Both triggers run the workflow file from the base/default branch, so a PR cannot edit
-# this check to approve itself. Approve with a native review, or comment `/approve <head-sha>`.
+# this check to approve itself. Approve by commenting `/approve <head-sha>`. A native approving review is
+# counted only the next time the check runs (a push or an /approve comment); it does not rerun the check by itself.
 # After one green run, mark `agent-approval-check` as a required status check on main.
 on:
   # zizmor: ignore[dangerous-triggers] -- no checkout, no PR code; composite action reads the event JSON and posts a commit status

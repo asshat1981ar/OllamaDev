@@ -94,4 +94,4 @@ jobs:
             --max-turns 50
             --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr diff:*)"
             --disallowedTools "WebFetch,WebSearch,Bash(./gradlew:*),Bash(gradle:*),Bash(python3:*),Bash(bash:*),Bash(sh:*),Bash(gh workflow run:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(python:*),Bash(make:*),Bash(curl:*)"
-            --append-system-prompt "CI context. You cannot run builds, tests or repo scripts in this job; CI runs Gradle on your pushes without secrets, so say what to check there instead of claiming tests passed. Follow CLAUDE.md design rules for any UI change and describe the screens you changed."
+            --append-system-prompt "CI context. You cannot run builds, tests or repo scripts in this job, and CI tests a claude/ branch only once a PR targets main, so say what CI should check instead of claiming tests passed. Follow CLAUDE.md design rules for any UI change and describe the screens you changed."
