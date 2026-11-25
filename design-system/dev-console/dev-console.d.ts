@@ -4,7 +4,7 @@ export type RowState = 'started' | 'ready' | 'completed' | 'canceled' | 'backlog
 export type Tone = 'neutral' | 'accent' | 'ok' | 'danger' | 'started' | 'backlog';
 export interface PageHeaderProps { eyebrow?: string; title: string; accent?: string; description?: React.ReactNode; children?: React.ReactNode }
 export declare function PageHeader(props: PageHeaderProps): React.ReactElement;
-export interface PanelProps { title: string; status?: Status; freshness?: string; actions?: React.ReactNode; banner?: React.ReactNode; padded?: boolean; className?: string; children?: React.ReactNode }
+export interface PanelProps { title: string; status?: Status; /** Word shown beside the dot; defaults to Live, Warning, Loading or Error. Hidden for idle. */ statusLabel?: string; freshness?: string; actions?: React.ReactNode; banner?: React.ReactNode; padded?: boolean; className?: string; children?: React.ReactNode }
 export declare function Panel(props: PanelProps): React.ReactElement;
 export interface StatusDotProps { status?: Status; label?: string }
 export declare function StatusDot(props: StatusDotProps): React.ReactElement;

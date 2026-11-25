@@ -10,9 +10,9 @@ What it would take to grow this kit from five web pages into the shared look of 
 
 ## 2. Close the accessibility gaps
 
-- [ ] Light theme soft pills (`ok`, `danger`, `backlog` on their `-soft` fills) are 4.2–4.3:1. Darken the text or lighten the fills to reach 4.5:1.
-- [ ] Light theme stale banner (`accent` on `accent-soft`) is 3.6:1. Darken its text.
-- [ ] Inputs rely on a `border` hairline of about 1.45:1. Add a `border-control` token at 3:1 or better for inputs and selects.
+- [x] Light theme soft pills (`ok`, `danger`, `backlog` on their `-soft` fills) were 4.2–4.3:1. Light `ok`, `danger` and `backlog` are now darker and reach 4.6:1 or better.
+- [x] Light theme stale banner (`accent` on `accent-soft`) was 3.6:1. Light `accent` is now `#845c1a`, 4.6:1 there and 5.7:1 under button text.
+- [x] Inputs relied on a `border` hairline of about 1.45:1. Inputs and selects now use `border-control`, 3:1 or better in both themes.
 - [ ] Check every preview with reduced motion on and with keyboard only.
 
 ## 3. Bring the tokens into the Android app

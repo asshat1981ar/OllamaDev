@@ -3,6 +3,7 @@
   var R = window.React, h = R.createElement;
   function cx() { return Array.prototype.filter.call(arguments, Boolean).join(" "); }
   function pick(p, omit) { var o = {}; for (var k in p) if (omit.indexOf(k) < 0) o[k] = p[k]; return o; }
+  var STATUS_WORD = { ok: "Live", warn: "Warning", loading: "Loading", err: "Error", error: "Error" };
   var DOT = { idle: "", ok: "ok", warn: "warn", loading: "warn", err: "err", error: "err" };
   function StatusDot(p) { return h("span", { className: cx("dc-dot", DOT[p.status || "idle"]), role: p.label ? "img" : undefined, "aria-label": p.label, "aria-hidden": p.label ? undefined : true }); }
   function PageHeader(p) {
@@ -14,7 +15,7 @@
   function Panel(p) {
     return h("section", { className: cx("dc-panel", p.className) },
       h("div", { className: "dc-panel-head" },
-        h("div", { className: "dc-panel-head-left" }, p.status !== undefined ? h(StatusDot, { status: p.status }) : null, h("span", { className: "dc-panel-title" }, p.title)),
+        h("div", { className: "dc-panel-head-left" }, p.status !== undefined ? h(StatusDot, { status: p.status }) : null, h("span", { className: "dc-panel-title" }, p.title), p.status !== undefined && p.status !== "idle" ? h("span", { className: cx("dc-panel-status", DOT[p.status]) }, p.statusLabel || STATUS_WORD[p.status] || p.status) : null),
         p.freshness ? h("span", { className: "dc-freshness" }, p.freshness) : null, p.actions || null),
       p.banner || null,
       h("div", { className: p.padded ? "dc-pad" : undefined }, p.children));
