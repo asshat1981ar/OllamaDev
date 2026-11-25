@@ -29,7 +29,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  screenshots:
+  # Base and head build on separate runners, so PR-controlled build code in the head
+  # job never shares a workspace with the base images it is compared against.
+  screenshots-base:
     if: |
       vars.CLAUDE_PAUSE != 'true' &&
       github.actor != 'dependabot[bot]' &&
@@ -41,17 +43,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout base (workspace root)
+      - name: Checkout base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
-          persist-credentials: false
-
-      - name: Checkout head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: head
           persist-credentials: false
 
       - name: Set up JDK 17
@@ -63,15 +58,10 @@ jobs:
       - name: Record base screenshots
         run: ./gradlew :app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest --no-daemon
 
-      - name: Record head screenshots
-        working-directory: head
-        run: ./gradlew :app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest --no-daemon
-
-      - name: Collect screenshots
+      - name: Collect base screenshots
         run: |
-          mkdir -p shots/base shots/head
+          mkdir -p shots/base
           cp app/build/outputs/roborazzi-screens/*.png shots/base/
-          cp head/app/build/outputs/roborazzi-screens/*.png shots/head/
 
       - name: Upload base screenshots
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -79,6 +69,41 @@ jobs:
           name: screens-base
           path: shots/base/
           retention-days: 7
+
+  screenshots-head:
+    # Runs after the base artifact exists; upload-artifact refuses to overwrite a name,
+    # so head code cannot replace screens-base.
+    needs: screenshots-base
+    if: |
+      vars.CLAUDE_PAUSE != 'true' &&
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'claude:screens')
+    runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Record head screenshots
+        run: ./gradlew :app:recordRoborazziDebug --tests com.example.ui.ScreenshotDriverTest --no-daemon
+
+      - name: Collect head screenshots
+        run: |
+          mkdir -p shots/head
+          cp app/build/outputs/roborazzi-screens/*.png shots/head/
 
       - name: Upload head screenshots
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -88,8 +113,8 @@ jobs:
           retention-days: 7
 
   design-review:
-    needs: screenshots
-    if: ${{ !cancelled() && needs.screenshots.result == 'success' && vars.CLAUDE_PAUSE != 'true' && github.actor != 'dependabot[bot]' }}
+    needs: [screenshots-base, screenshots-head]
+    if: ${{ !cancelled() && needs.screenshots-base.result == 'success' && needs.screenshots-head.result == 'success' && vars.CLAUDE_PAUSE != 'true' && github.actor != 'dependabot[bot]' }}
     runs-on: ${{ vars.CLAUDE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     env:
@@ -126,6 +151,33 @@ jobs:
           find shots -type f ! -name '*.png' -delete
           find shots -type f -name '*.png' -size +4M -delete
           echo "base: $(find shots/base -type f | wc -l) png, head: $(find shots/head -type f | wc -l) png" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare Bash sandbox (bubblewrap)
+        # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB stays on; it needs bubblewrap and unprivileged
+        # user namespaces, which Ubuntu 24.04's AppArmor restricts by default.
+        if: runner.os == 'Linux'
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
+        run: |
+          set -euo pipefail
+          if ! command -v bwrap >/dev/null 2>&1; then
+            if sudo -n true 2>/dev/null; then
+              sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+            else
+              echo "::error::bubblewrap is missing and passwordless sudo is unavailable; install bubblewrap on this runner."
+              exit 1
+            fi
+          fi
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+            if [ "$HOSTED" = "true" ] && sudo -n true 2>/dev/null; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            else
+              echo "::error::AppArmor blocks unprivileged user namespaces on this self-hosted runner. Allow bwrap (an AppArmor profile, or the sysctl) on the host; this job will not change a self-hosted host setting."
+              exit 1
+            fi
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc true
+          echo "bubblewrap sandbox works"
 
       - name: Design review
         id: review

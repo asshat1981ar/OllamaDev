@@ -40,6 +40,33 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Prepare Bash sandbox (bubblewrap)
+        # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB stays on; it needs bubblewrap and unprivileged
+        # user namespaces, which Ubuntu 24.04's AppArmor restricts by default.
+        if: runner.os == 'Linux'
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
+        run: |
+          set -euo pipefail
+          if ! command -v bwrap >/dev/null 2>&1; then
+            if sudo -n true 2>/dev/null; then
+              sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+            else
+              echo "::error::bubblewrap is missing and passwordless sudo is unavailable; install bubblewrap on this runner."
+              exit 1
+            fi
+          fi
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+            if [ "$HOSTED" = "true" ] && sudo -n true 2>/dev/null; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            else
+              echo "::error::AppArmor blocks unprivileged user namespaces on this self-hosted runner. Allow bwrap (an AppArmor profile, or the sysctl) on the host; this job will not change a self-hosted host setting."
+              exit 1
+            fi
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc true
+          echo "bubblewrap sandbox works"
+
       - name: Compare contracts
         id: contract
         continue-on-error: true

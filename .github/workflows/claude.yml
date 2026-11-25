@@ -78,6 +78,33 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Prepare Bash sandbox (bubblewrap)
+        # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB stays on; it needs bubblewrap and unprivileged
+        # user namespaces, which Ubuntu 24.04's AppArmor restricts by default.
+        if: runner.os == 'Linux' && steps.fork.outputs.cross != 'true'
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
+        run: |
+          set -euo pipefail
+          if ! command -v bwrap >/dev/null 2>&1; then
+            if sudo -n true 2>/dev/null; then
+              sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+            else
+              echo "::error::bubblewrap is missing and passwordless sudo is unavailable; install bubblewrap on this runner."
+              exit 1
+            fi
+          fi
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+            if [ "$HOSTED" = "true" ] && sudo -n true 2>/dev/null; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            else
+              echo "::error::AppArmor blocks unprivileged user namespaces on this self-hosted runner. Allow bwrap (an AppArmor profile, or the sysctl) on the host; this job will not change a self-hosted host setting."
+              exit 1
+            fi
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc true
+          echo "bubblewrap sandbox works"
+
       - name: Run Claude
         if: steps.fork.outputs.cross != 'true'
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
@@ -92,6 +119,6 @@ jobs:
             --permission-mode auto
             --model ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
             --max-turns 50
-            --allowedTools "Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr diff:*)"
-            --disallowedTools "WebFetch,WebSearch,Bash(./gradlew:*),Bash(gradle:*),Bash(python3:*),Bash(bash:*),Bash(sh:*),Bash(gh workflow run:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(python:*),Bash(make:*),Bash(curl:*)"
+            --allowedTools "Bash(git status),Bash(git status --short),Bash(git diff),Bash(git diff --stat),Bash(git diff --cached),Bash(git diff --cached --stat),Bash(git log --oneline -20),Bash(git show --stat HEAD),Bash(gh pr diff:*)"
+            --disallowedTools "Bash(git diff --no-index:*),Bash(git diff --output:*),WebFetch,WebSearch,Bash(./gradlew:*),Bash(gradle:*),Bash(python3:*),Bash(bash:*),Bash(sh:*),Bash(gh workflow run:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(python:*),Bash(make:*),Bash(curl:*)"
             --append-system-prompt "CI context. You cannot run builds, tests or repo scripts in this job, and CI tests a claude/ branch only once a PR targets main, so say what CI should check instead of claiming tests passed. Follow CLAUDE.md design rules for any UI change and describe the screens you changed."
