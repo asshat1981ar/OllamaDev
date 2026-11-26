@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Review Triage</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="dev-console.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="dev-console.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  // Sample data only. A real page fills this from the GitHub connector.
+  var D = window.DevConsole, h = React.createElement;
+  var prs = [
+    { n: 42, title: 'Add streaming to the chat endpoint', draft: false, user: 'asshat1981ar', updated: '3h ago' },
+    { n: 39, title: 'Model picker screen', draft: true, user: 'asshat1981ar', updated: '2d ago' }
+  ];
+  function App() {
+    return h('div', { className: 'dc-shell' },
+      h(D.PageHeader, { eyebrow: 'MCP-connected · GitHub Integration', title: 'Code Review', accent: 'Triage', description: 'Open PRs on asshat1981ar/OllamaDev, oldest-updated first. Sample data.' }),
+      h('div', { className: 'dc-stack' },
+        h(D.StatGrid, null,
+          h(D.StatCard, { label: 'Open PRs', value: 2 }), h(D.StatCard, { label: 'Drafts', value: 1 }),
+          h(D.StatCard, { label: 'Ready', value: 1 }), h(D.StatCard, { label: 'Oldest', value: '2d' })),
+        h(D.Panel, { title: 'Open Pull Requests', status: 'ok', freshness: 'as of just now' },
+          prs.map(function (p) {
+            return h(D.ListRow, { key: p.n, state: p.draft ? 'draft' : 'ready', title: '#' + p.n + ' ' + p.title,
+              meta: [h(D.Pill, { key: 's', state: p.draft ? 'draft' : 'ready' }, p.draft ? 'Draft' : 'Ready'), h('span', { key: 'u' }, '@' + p.user), h('span', { key: 't' }, 'updated ' + p.updated)],
+              aside: h(D.Button, { size: 'sm' }, 'Request Copilot Review') });
+          }))),
+      h(D.PageFooter, null, 'Refreshes automatically every minute'));
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
