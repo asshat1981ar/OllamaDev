@@ -11,7 +11,7 @@ name: claude
 # are denied because they return unfiltered comments, bypassing the include/exclude_comments_by_actor
 # filters that only cover the action's own pre-fetched context) and the action's file tools, and
 # (3) scrubs secrets from Claude subprocess env. Claude cannot run Gradle here; CI runs the
-# tests on its pushes and holds no secrets. Residual risk: --permission-mode auto may let
+# tests only once a PR targets main or Android CI is dispatched, and holds no secrets. Residual risk: --permission-mode auto may let
 # its safety reviewer approve an unlisted command, and a same-repo branch can carry hostile
 # files. Both need write access to this repo.
 on:
@@ -121,4 +121,4 @@ jobs:
             --max-turns 50
             --allowedTools "Bash(git status),Bash(git status --short),Bash(git diff),Bash(git diff --stat),Bash(git diff --cached),Bash(git diff --cached --stat),Bash(git log --oneline -20),Bash(git show --stat HEAD),Bash(gh pr diff:*)"
             --disallowedTools "Bash(git diff --no-index:*),Bash(git diff --output:*),WebFetch,WebSearch,Bash(./gradlew:*),Bash(gradle:*),Bash(python3:*),Bash(bash:*),Bash(sh:*),Bash(gh workflow run:*),Bash(gh api:*),Bash(gh search:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(python:*),Bash(make:*),Bash(curl:*)"
-            --append-system-prompt "CI context. You cannot run builds, tests or repo scripts in this job, and CI tests a claude/ branch only once a PR targets main, so say what CI should check instead of claiming tests passed. Follow CLAUDE.md design rules for any UI change and describe the screens you changed."
+            --append-system-prompt "CI context. You cannot run builds, tests or repo scripts in this job, and CI tests a claude/ branch only once a PR targets main or Android CI is dispatched, so say what CI should check instead of claiming tests passed. Follow CLAUDE.md design rules for any UI change and describe the screens you changed."
