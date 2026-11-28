@@ -69,8 +69,27 @@ jobs:
         with:
           cache-read-only: ${{ inputs.cache_read_only }}
 
+      # Robolectric downloads its android-all runtime jars from Maven Central at
+      # test time, into ~/.m2 rather than the Gradle cache, so setup-gradle does
+      # not keep them. A 429 from Maven Central then fails every test class in
+      # setup. Keep them in their own cache, keyed on the version catalog.
+      - name: Restore Robolectric runtime jars
+        if: contains(inputs.task, 'UnitTest')
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: robolectric-${{ runner.os }}-
+
       - name: Run gradle task
         run: ./gradlew ${{ inputs.task }}
+
+      - name: Save Robolectric runtime jars
+        if: contains(inputs.task, 'UnitTest') && !inputs.cache_read_only && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
 
       - name: Upload build outputs
         if: always()
